@@ -1,6 +1,6 @@
 # mcp-parser
 
-Parse, validate, and snapshot [Model Context Protocol](https://modelcontextprotocol.io) servers. The swagger-parser for MCP.
+Parse, validate, and snapshot [Model Context Protocol](https://modelcontextprotocol.io) servers.
 
 ## Install
 
@@ -41,7 +41,8 @@ console.log(spec.tools?.length); // 5
 ```
 
 Options:
-- `dereference` (default: `true`) — resolve `$ref` pointers using the spec's `$defs`
+
+- `dereference` (default: `true`). Resolves `$ref` pointers using the spec's `$defs`.
 
 ### `parseString(content, options?)`
 
@@ -89,12 +90,13 @@ await writeFile("mcp.json", JSON.stringify(spec, null, 2));
 ```
 
 Supported transports:
-- `stdio` — spawn a process and communicate via stdin/stdout
-- `sse` — connect to an SSE endpoint (coming soon)
+
+- `stdio`: spawn a process and communicate via stdin/stdout
+- `sse`: connect to an SSE endpoint (coming soon)
 
 ### `generateLlmsTxt(spec, baseUrl?)`
 
-Generate an [llms.txt](https://llmstxt.org) file — a concise, LLM-friendly index.
+Generate an [llms.txt](https://llmstxt.org) index file for LLM discovery.
 
 ```typescript
 const txt = generateLlmsTxt(spec, "https://docs.example.com");
@@ -133,7 +135,7 @@ mcp-parser generate ./mcp.json --format llms-full-txt -o llms-full.txt
 
 ## What is mcp.json?
 
-An `mcp.json` file is a static snapshot of an MCP server's capabilities — its tools, resources, and prompts. Think of it as `openapi.json` for MCP servers.
+An `mcp.json` file is a static snapshot of an MCP server's capabilities: its tools, resources, and prompts. Think of it as `openapi.json` for MCP servers.
 
 MCP servers describe themselves at runtime via introspection (`tools/list`, `resources/list`, `prompts/list`). An `mcp.json` captures that in a versionable file for documentation, validation, and code generation.
 
@@ -141,8 +143,8 @@ See [mcp-spec](https://github.com/sourcey/mcp-spec) for the full type definition
 
 ## Related
 
-- [mcp-spec](https://github.com/sourcey/mcp-spec) — TypeScript types and JSON Schema for MCP specs
-- [sourcey](https://github.com/sourcey/sourcey) — Generate beautiful documentation from MCP specs, OpenAPI, and markdown
+- [mcp-spec](https://github.com/sourcey/mcp-spec): TypeScript types and JSON Schema for MCP specs
+- [sourcey](https://github.com/sourcey/sourcey): generate documentation from MCP specs, OpenAPI, and markdown
 
 ## License
 
