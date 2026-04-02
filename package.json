@@ -57,6 +57,6 @@
   },
   "homepage": "https://github.com/sourcey/mcp-parser",
   "dependencies": {
-    "mcp-schema": "^0.1.0"
+    "mcp-schema": "^0.2.0"
   }
 }
