@@ -1,6 +1,23 @@
 # mcp-parser
 
+[![CI](https://github.com/sourcey/mcp-parser/actions/workflows/ci.yml/badge.svg)](https://github.com/sourcey/mcp-parser/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/mcp-parser)](https://www.npmjs.com/package/mcp-parser)
+[![license](https://img.shields.io/npm/l/mcp-parser)](https://github.com/sourcey/mcp-parser/blob/main/LICENSE)
+
 Parse, validate, and snapshot [Model Context Protocol](https://modelcontextprotocol.io) servers.
+
+## MCP Protocol Compatibility
+
+Built against the [MCP specification](https://github.com/modelcontextprotocol/specification). Supports all released protocol versions:
+
+| Protocol Version | Status |
+|------------------|--------|
+| [`2025-11-25`](https://modelcontextprotocol.io/specification/2025-11-25) | Current stable |
+| [`2025-06-18`](https://modelcontextprotocol.io/specification/2025-06-18) | Supported |
+| [`2025-03-26`](https://modelcontextprotocol.io/specification/2025-03-26) | Supported |
+| [`2024-11-05`](https://modelcontextprotocol.io/specification/2024-11-05) | Supported |
+
+All three MCP transports are supported: [stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio), [SSE](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#backwards-compatibility), and [streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http).
 
 ## Install
 
@@ -29,9 +46,9 @@ const llmsTxt = generateLlmsTxt(spec);
 
 A static snapshot of an MCP server's capabilities: its tools, resources, and prompts. Think of it as `openapi.json` for MCP servers.
 
-MCP servers describe themselves at runtime via introspection (`tools/list`, `resources/list`, `prompts/list`). An `mcp.json` captures that in a versionable file for documentation, validation, and code generation.
+MCP servers describe themselves at runtime via [`tools/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#listing-tools), [`resources/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/resources#listing-resources), and [`prompts/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/prompts#listing-prompts). An `mcp.json` captures that in a versionable file for documentation, validation, and code generation.
 
-See [mcp-schema](https://github.com/sourcey/mcp-schema) for the type definitions and JSON Schema.
+See [mcp-schema](https://github.com/sourcey/mcp-schema) for the full type definitions and JSON Schema.
 
 ## API
 
@@ -54,7 +71,7 @@ Options:
 Parse a JSON string directly.
 
 ```typescript
-const spec = parseString('{ "mcpSpec": "0.1.0", ... }');
+const spec = parseString('{ "mcpSpec": "0.2.0", ... }');
 ```
 
 ### `validate(spec)`
@@ -76,7 +93,7 @@ Checks for:
 
 ### `snapshot(options)`
 
-Connect to a running MCP server and capture a static snapshot. Supports all three MCP transports.
+Connect to a running MCP server and capture a static snapshot. Supports all three MCP [transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 
 ```typescript
 import { snapshot } from "mcp-parser";
@@ -149,6 +166,13 @@ mcp-parser generate ./mcp.json --format llms-txt -o llms.txt
 # Generate full reference
 mcp-parser generate ./mcp.json --format llms-full-txt -o llms-full.txt
 ```
+
+## MCP Specification Resources
+
+- [MCP Specification](https://modelcontextprotocol.io/specification/2025-11-25) (current stable)
+- [Specification repo](https://github.com/modelcontextprotocol/specification) (includes JSON Schema for each protocol version)
+- [TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (`@modelcontextprotocol/sdk`)
+- [Python SDK](https://github.com/modelcontextprotocol/python-sdk) (`mcp` on PyPI)
 
 ## Related
 
