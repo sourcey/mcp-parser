@@ -2,7 +2,7 @@
  * Validate MCP spec documents against the schema.
  */
 
-import type { McpSpec, McpTool, McpResource, McpPrompt } from "mcp-spec";
+import type { McpSpec, McpTool, McpResource, McpPrompt } from "mcp-schema";
 
 /** A single validation diagnostic. */
 export interface ValidationDiagnostic {

@@ -14,8 +14,8 @@ import type {
   McpPrompt,
   McpCapabilities,
   McpServerInfo,
-} from "mcp-spec";
-import { MCP_SPEC_VERSION } from "mcp-spec";
+} from "mcp-schema";
+import { MCP_SPEC_VERSION } from "mcp-schema";
 
 // ---------------------------------------------------------------------------
 // JSON-RPC helpers

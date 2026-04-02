@@ -9,7 +9,7 @@ import type {
   McpResourceTemplate,
   McpPrompt,
   JsonSchema,
-} from "mcp-spec";
+} from "mcp-schema";
 
 // ---------------------------------------------------------------------------
 // llms.txt

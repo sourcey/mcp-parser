@@ -3,7 +3,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import type { McpSpec } from "mcp-spec";
+import type { McpSpec } from "mcp-schema";
 
 export interface ParseOptions {
   /** Resolve $ref pointers within tool schemas. Default: true. */

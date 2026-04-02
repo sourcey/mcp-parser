@@ -33,9 +33,9 @@ export type {
   McpCapabilities,
   McpTransport,
   JsonSchema,
-} from "mcp-spec";
+} from "mcp-schema";
 
-export { MCP_SPEC_VERSION, mcpSpecSchema } from "mcp-spec";
+export { MCP_SPEC_VERSION, mcpSpecSchema } from "mcp-schema";
 
 // Parser
 export { parse, parseString, McpParseError } from "./parse.js";

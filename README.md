@@ -139,11 +139,11 @@ An `mcp.json` file is a static snapshot of an MCP server's capabilities: its too
 
 MCP servers describe themselves at runtime via introspection (`tools/list`, `resources/list`, `prompts/list`). An `mcp.json` captures that in a versionable file for documentation, validation, and code generation.
 
-See [mcp-spec](https://github.com/sourcey/mcp-spec) for the full type definitions and JSON Schema.
+See [mcp-schema](https://github.com/sourcey/mcp-schema) for the full type definitions and JSON Schema.
 
 ## Related
 
-- [mcp-spec](https://github.com/sourcey/mcp-spec): TypeScript types and JSON Schema for MCP specs
+- [mcp-schema](https://github.com/sourcey/mcp-schema): TypeScript types and JSON Schema for MCP specs
 - [sourcey](https://github.com/sourcey/sourcey): generate documentation from MCP specs, OpenAPI, and markdown
 
 ## License
