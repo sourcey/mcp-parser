@@ -47,22 +47,30 @@ async function main(): Promise<void> {
 
 function printUsage(): void {
   console.log(`
-mcp-parser — Parse, validate, and snapshot MCP servers
+mcp-parser - Parse, validate, and snapshot MCP servers
 
 Usage:
   mcp-parser parse <file>                        Parse and print an mcp.json
   mcp-parser validate <file>                     Validate an mcp.json file
-  mcp-parser snapshot --stdio <command> [args]    Snapshot a running MCP server
-  mcp-parser generate <file> [--format <fmt>]     Generate output from mcp.json
+  mcp-parser snapshot <transport> [options]       Snapshot a running MCP server
+  mcp-parser generate <file> [--format <fmt>]    Generate output from mcp.json
+
+Transports:
+  --stdio "<command>"     Spawn a process and communicate via stdin/stdout
+  --sse <url>             Connect to an SSE endpoint
+  --http <url>            Connect via streamable HTTP
 
 Options:
   --output, -o <file>     Write output to file instead of stdout
   --format <fmt>          Output format: llms-txt (default), llms-full-txt
+  --header <key:value>    Add HTTP header (SSE/HTTP transports, repeatable)
   --help, -h              Show this help message
 
 Examples:
   mcp-parser validate ./mcp.json
   mcp-parser snapshot --stdio "node server.js" -o mcp.json
+  mcp-parser snapshot --sse http://localhost:3000/sse -o mcp.json
+  mcp-parser snapshot --http http://localhost:3000/mcp -o mcp.json
   mcp-parser generate ./mcp.json --format llms-txt -o llms.txt
 `);
 }
@@ -118,33 +126,37 @@ async function cmdValidate(): Promise<void> {
 }
 
 async function cmdSnapshot(): Promise<void> {
+  const headers = parseHeaders();
+  const output = getOutputFlag() ?? "mcp.json";
+
+  let transport: Parameters<typeof snapshot>[0]["transport"];
+
   const stdioIdx = args.indexOf("--stdio");
-  if (stdioIdx === -1 || !args[stdioIdx + 1]) {
-    console.error('Usage: mcp-parser snapshot --stdio "<command>" [args] -o <output>');
+  const sseIdx = args.indexOf("--sse");
+  const httpIdx = args.indexOf("--http");
+
+  if (stdioIdx !== -1 && args[stdioIdx + 1]) {
+    const commandStr = args[stdioIdx + 1];
+    const parts = commandStr.split(/\s+/);
+    transport = { type: "stdio", command: parts[0], args: parts.slice(1) };
+    console.log(`Connecting via stdio: ${commandStr}...`);
+  } else if (sseIdx !== -1 && args[sseIdx + 1]) {
+    transport = { type: "sse", url: args[sseIdx + 1], ...(Object.keys(headers).length && { headers }) };
+    console.log(`Connecting via SSE: ${args[sseIdx + 1]}...`);
+  } else if (httpIdx !== -1 && args[httpIdx + 1]) {
+    transport = { type: "streamable-http", url: args[httpIdx + 1], ...(Object.keys(headers).length && { headers }) };
+    console.log(`Connecting via HTTP: ${args[httpIdx + 1]}...`);
+  } else {
+    console.error("Usage: mcp-parser snapshot --stdio|--sse|--http <target> [-o output]");
     process.exit(1);
   }
 
-  const commandStr = args[stdioIdx + 1];
-  const parts = commandStr.split(/\s+/);
-  const cmd = parts[0];
-  const cmdArgs = parts.slice(1);
-
-  const output = getOutputFlag() ?? "mcp.json";
-
-  console.log(`Connecting to ${commandStr}...`);
-
-  const spec = await snapshot({
-    transport: { type: "stdio", command: cmd, args: cmdArgs },
-  });
+  const spec = await snapshot({ transport });
 
   await writeFile(output, JSON.stringify(spec, null, 2) + "\n");
   console.log(`Snapshot written to ${output}`);
-  console.log(
-    `  Server: ${spec.server.name} v${spec.server.version}`,
-  );
-  console.log(
-    `  Tools: ${spec.tools?.length ?? 0}, Resources: ${spec.resources?.length ?? 0}, Prompts: ${spec.prompts?.length ?? 0}`,
-  );
+  console.log(`  Server: ${spec.server.name} v${spec.server.version}`);
+  console.log(`  Tools: ${spec.tools?.length ?? 0}, Resources: ${spec.resources?.length ?? 0}, Prompts: ${spec.prompts?.length ?? 0}`);
 }
 
 async function cmdGenerate(): Promise<void> {
@@ -177,6 +189,21 @@ async function cmdGenerate(): Promise<void> {
   } else {
     console.log(content);
   }
+}
+
+function parseHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--header" && args[i + 1]) {
+      const val = args[i + 1];
+      const sep = val.indexOf(":");
+      if (sep > 0) {
+        headers[val.slice(0, sep).trim()] = val.slice(sep + 1).trim();
+      }
+      i++;
+    }
+  }
+  return headers;
 }
 
 function getOutputFlag(): string | undefined {

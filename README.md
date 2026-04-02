@@ -13,20 +13,25 @@ npm install mcp-parser
 ```typescript
 import { parse, validate, generateLlmsTxt } from "mcp-parser";
 
-// Parse an mcp.json file
 const spec = await parse("./mcp.json");
 
-// Validate it
 const result = validate(spec);
 if (!result.valid) {
   for (const d of result.diagnostics) {
-    console.error(`${d.severity}: ${d.path} — ${d.message}`);
+    console.error(`${d.severity}: ${d.path} - ${d.message}`);
   }
 }
 
-// Generate llms.txt for AI agent discovery
 const llmsTxt = generateLlmsTxt(spec);
 ```
+
+## What is mcp.json?
+
+A static snapshot of an MCP server's capabilities: its tools, resources, and prompts. Think of it as `openapi.json` for MCP servers.
+
+MCP servers describe themselves at runtime via introspection (`tools/list`, `resources/list`, `prompts/list`). An `mcp.json` captures that in a versionable file for documentation, validation, and code generation.
+
+See [mcp-schema](https://github.com/sourcey/mcp-schema) for the type definitions and JSON Schema.
 
 ## API
 
@@ -58,11 +63,12 @@ Validate an `McpSpec` for correctness and best practices.
 
 ```typescript
 const result = validate(spec);
-// result.valid — boolean (true if no errors)
-// result.diagnostics — array of { severity, path, message }
+// result.valid: boolean (true if no errors)
+// result.diagnostics: array of { severity, path, message }
 ```
 
 Checks for:
+
 - Required fields (mcpSpec, server, tool names, inputSchema)
 - Duplicate tool/resource/prompt names
 - Missing descriptions (warnings)
@@ -70,29 +76,31 @@ Checks for:
 
 ### `snapshot(options)`
 
-Connect to a running MCP server and capture a static snapshot.
+Connect to a running MCP server and capture a static snapshot. Supports all three MCP transports.
 
 ```typescript
 import { snapshot } from "mcp-parser";
+import { writeFile } from "node:fs/promises";
 
+// stdio
 const spec = await snapshot({
-  transport: {
-    type: "stdio",
-    command: "node",
-    args: ["my-mcp-server.js"],
-  },
-  timeout: 30_000,
+  transport: { type: "stdio", command: "node", args: ["server.js"] },
 });
 
-// Write the snapshot to disk
-import { writeFile } from "node:fs/promises";
+// SSE
+const spec = await snapshot({
+  transport: { type: "sse", url: "http://localhost:3000/sse" },
+});
+
+// Streamable HTTP
+const spec = await snapshot({
+  transport: { type: "streamable-http", url: "http://localhost:3000/mcp" },
+});
+
 await writeFile("mcp.json", JSON.stringify(spec, null, 2));
 ```
 
-Supported transports:
-
-- `stdio`: spawn a process and communicate via stdin/stdout
-- `sse`: connect to an SSE endpoint (coming soon)
+All transports support an optional `timeout` (default: 30s). SSE and HTTP transports accept a `headers` object for authentication.
 
 ### `generateLlmsTxt(spec, baseUrl?)`
 
@@ -104,7 +112,7 @@ const txt = generateLlmsTxt(spec, "https://docs.example.com");
 
 ### `generateLlmsFullTxt(spec)`
 
-Generate a complete markdown reference (llms-full.txt) for large-context LLMs.
+Generate a complete markdown reference for large-context LLMs.
 
 ```typescript
 const full = generateLlmsFullTxt(spec);
@@ -123,8 +131,17 @@ mcp-parser parse ./mcp.json
 # Validate
 mcp-parser validate ./mcp.json
 
-# Snapshot a running server
+# Snapshot via stdio
 mcp-parser snapshot --stdio "node server.js" -o mcp.json
+
+# Snapshot via SSE
+mcp-parser snapshot --sse http://localhost:3000/sse -o mcp.json
+
+# Snapshot via streamable HTTP
+mcp-parser snapshot --http http://localhost:3000/mcp -o mcp.json
+
+# With auth headers
+mcp-parser snapshot --sse http://localhost:3000/sse --header "Authorization:Bearer tok" -o mcp.json
 
 # Generate llms.txt
 mcp-parser generate ./mcp.json --format llms-txt -o llms.txt
@@ -132,14 +149,6 @@ mcp-parser generate ./mcp.json --format llms-txt -o llms.txt
 # Generate full reference
 mcp-parser generate ./mcp.json --format llms-full-txt -o llms-full.txt
 ```
-
-## What is mcp.json?
-
-An `mcp.json` file is a static snapshot of an MCP server's capabilities: its tools, resources, and prompts. Think of it as `openapi.json` for MCP servers.
-
-MCP servers describe themselves at runtime via introspection (`tools/list`, `resources/list`, `prompts/list`). An `mcp.json` captures that in a versionable file for documentation, validation, and code generation.
-
-See [mcp-schema](https://github.com/sourcey/mcp-schema) for the full type definitions and JSON Schema.
 
 ## Related
 

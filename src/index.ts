@@ -52,6 +52,7 @@ export type {
   SnapshotTransport,
   StdioTransport,
   SseTransport,
+  StreamableHttpTransport,
 } from "./snapshot.js";
 
 // Generators

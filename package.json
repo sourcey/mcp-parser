@@ -1,7 +1,7 @@
 {
   "name": "mcp-parser",
-  "version": "0.1.0",
-  "description": "Parse, validate, and snapshot Model Context Protocol servers. The swagger-parser for MCP.",
+  "version": "0.2.0",
+  "description": "Parse, validate, and snapshot Model Context Protocol servers.",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -25,9 +25,6 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
-  },
-  "dependencies": {
-    "mcp-schema": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.15",
@@ -58,5 +55,8 @@
   "bugs": {
     "url": "https://github.com/sourcey/mcp-parser/issues"
   },
-  "homepage": "https://github.com/sourcey/mcp-parser"
+  "homepage": "https://github.com/sourcey/mcp-parser",
+  "dependencies": {
+    "mcp-schema": "^0.1.0"
+  }
 }
