@@ -1,0 +1,147 @@
+{
+  "mcpSpec": "0.1.0",
+  "mcpVersion": "2025-03-26",
+  "server": {
+    "name": "weather-server",
+    "version": "1.2.0"
+  },
+  "description": "Real-time weather data and forecasts for any city worldwide.",
+  "capabilities": {
+    "tools": { "listChanged": false },
+    "resources": { "subscribe": false, "listChanged": false }
+  },
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["weather-mcp-server"]
+  },
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Get current weather conditions for a city",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City name (e.g., \"San Francisco\")"
+          },
+          "units": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "default": "celsius",
+            "description": "Temperature units"
+          }
+        },
+        "required": ["city"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "temperature": { "type": "number" },
+          "conditions": { "type": "string" },
+          "humidity": { "type": "number" },
+          "wind_speed": { "type": "number" }
+        },
+        "required": ["temperature", "conditions"]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_forecast",
+      "description": "Get a multi-day weather forecast",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City name"
+          },
+          "days": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 14,
+            "default": 5,
+            "description": "Number of days to forecast"
+          }
+        },
+        "required": ["city"]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "set_alert",
+      "description": "Set a weather alert for a city when conditions match",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City to monitor"
+          },
+          "condition": {
+            "type": "string",
+            "enum": ["rain", "snow", "extreme_heat", "extreme_cold", "storm"],
+            "description": "Weather condition to alert on"
+          },
+          "webhook_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "URL to POST when alert triggers"
+          }
+        },
+        "required": ["city", "condition", "webhook_url"]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "idempotentHint": true
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "weather://cities",
+      "name": "Supported Cities",
+      "description": "List of all cities with available weather data",
+      "mimeType": "application/json"
+    },
+    {
+      "uri": "weather://alerts",
+      "name": "Active Alerts",
+      "description": "Currently active weather alerts",
+      "mimeType": "application/json"
+    }
+  ],
+  "resourceTemplates": [
+    {
+      "uriTemplate": "weather://{city}/current",
+      "name": "Current Weather",
+      "description": "Current weather conditions for a specific city",
+      "mimeType": "application/json"
+    }
+  ],
+  "prompts": [
+    {
+      "name": "weather_report",
+      "description": "Generate a natural language weather report for a location",
+      "arguments": [
+        {
+          "name": "city",
+          "description": "City to report on",
+          "required": true
+        },
+        {
+          "name": "style",
+          "description": "Report style: brief, detailed, or casual",
+          "required": false
+        }
+      ]
+    }
+  ]
+}
