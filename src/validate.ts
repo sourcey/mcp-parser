@@ -2,7 +2,7 @@
  * Validate MCP spec documents against the schema.
  */
 
-import type { McpSpec, McpTool, McpResource, McpPrompt } from "mcp-schema";
+import type { McpSpec, McpTool, McpResource, McpResourceTemplate, McpPrompt } from "mcp-schema";
 
 /** A single validation diagnostic. */
 export interface ValidationDiagnostic {
@@ -112,6 +112,16 @@ export function validate(spec: McpSpec): ValidationResult {
     }
   }
 
+  // Validate resource templates
+  if (spec.resourceTemplates) {
+    const templateUris = new Set<string>();
+    for (let i = 0; i < spec.resourceTemplates.length; i++) {
+      const template = spec.resourceTemplates[i];
+      const path = `resourceTemplates[${i}]`;
+      validateResourceTemplate(template, path, templateUris, diagnostics);
+    }
+  }
+
   // Validate prompts
   if (spec.prompts) {
     const promptNames = new Set<string>();
@@ -170,6 +180,43 @@ function validateTool(
       path: `${path}.inputSchema.type`,
       message: `Tool "${tool.name}" inputSchema type must be "object"`,
     });
+  } else if (tool.inputSchema.required && tool.inputSchema.properties) {
+    // Check required fields reference existing properties
+    for (const req of tool.inputSchema.required) {
+      if (!(req in tool.inputSchema.properties)) {
+        diagnostics.push({
+          severity: "error",
+          path: `${path}.inputSchema.required`,
+          message: `Tool "${tool.name}" requires "${req}" but it is not defined in properties`,
+        });
+      }
+    }
+  }
+
+  // Validate outputSchema if present
+  if (tool.outputSchema && tool.outputSchema.type && tool.outputSchema.type !== "object") {
+    diagnostics.push({
+      severity: "warning",
+      path: `${path}.outputSchema.type`,
+      message: `Tool "${tool.name}" outputSchema type is "${tool.outputSchema.type}", expected "object"`,
+    });
+  }
+
+  // Warn on tool name conventions
+  if (tool.name && /[A-Z]/.test(tool.name)) {
+    diagnostics.push({
+      severity: "warning",
+      path: `${path}.name`,
+      message: `Tool "${tool.name}" uses uppercase characters — lowercase with underscores is conventional`,
+    });
+  }
+
+  if (tool.name && /\s/.test(tool.name)) {
+    diagnostics.push({
+      severity: "error",
+      path: `${path}.name`,
+      message: `Tool "${tool.name}" contains whitespace`,
+    });
   }
 }
 
@@ -193,6 +240,15 @@ function validateResource(
     });
   } else {
     uris.add(resource.uri);
+  }
+
+  // Validate URI has a scheme
+  if (resource.uri && !/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(resource.uri)) {
+    diagnostics.push({
+      severity: "warning",
+      path: `${path}.uri`,
+      message: `Resource URI "${resource.uri}" has no scheme (e.g., "file://", "https://")`,
+    });
   }
 
   if (!resource.name) {
@@ -261,6 +317,64 @@ function validatePrompt(
       } else {
         argNames.add(arg.name);
       }
+
+      if (arg.name && !arg.description) {
+        diagnostics.push({
+          severity: "warning",
+          path: `${path}.arguments[${j}].description`,
+          message: `Prompt argument "${arg.name}" has no description`,
+        });
+      }
     }
+  }
+}
+
+function validateResourceTemplate(
+  template: McpResourceTemplate,
+  path: string,
+  uris: Set<string>,
+  diagnostics: ValidationDiagnostic[],
+): void {
+  if (!template.uriTemplate) {
+    diagnostics.push({
+      severity: "error",
+      path: `${path}.uriTemplate`,
+      message: "Resource template is missing a uriTemplate",
+    });
+  } else {
+    if (uris.has(template.uriTemplate)) {
+      diagnostics.push({
+        severity: "error",
+        path: `${path}.uriTemplate`,
+        message: `Duplicate resource template URI: "${template.uriTemplate}"`,
+      });
+    } else {
+      uris.add(template.uriTemplate);
+    }
+
+    // URI templates should contain at least one {variable}
+    if (!/\{[^}]+\}/.test(template.uriTemplate)) {
+      diagnostics.push({
+        severity: "warning",
+        path: `${path}.uriTemplate`,
+        message: `Resource template "${template.uriTemplate}" has no template variables — use a resource instead`,
+      });
+    }
+  }
+
+  if (!template.name) {
+    diagnostics.push({
+      severity: "error",
+      path: `${path}.name`,
+      message: "Resource template is missing a name",
+    });
+  }
+
+  if (!template.description) {
+    diagnostics.push({
+      severity: "warning",
+      path: `${path}.description`,
+      message: `Resource template "${template.name}" has no description`,
+    });
   }
 }

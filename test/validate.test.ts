@@ -121,6 +121,82 @@ describe("validate", () => {
         ),
       ).toBe(true);
     });
+
+    it("errors when required references non-existent property", () => {
+      const result = validate(
+        makeSpec({
+          tools: [
+            {
+              name: "foo",
+              description: "x",
+              inputSchema: {
+                type: "object",
+                properties: { a: { type: "string" } },
+                required: ["a", "b"],
+              },
+            },
+          ],
+        }),
+      );
+      expect(result.valid).toBe(false);
+      expect(
+        result.diagnostics.some((d) => d.message.includes('"b"')),
+      ).toBe(true);
+    });
+
+    it("warns on non-object outputSchema type", () => {
+      const result = validate(
+        makeSpec({
+          tools: [
+            {
+              name: "foo",
+              description: "x",
+              inputSchema: { type: "object" },
+              outputSchema: { type: "string" },
+            },
+          ],
+        }),
+      );
+      expect(result.valid).toBe(true);
+      expect(
+        result.diagnostics.some((d) => d.message.includes("outputSchema")),
+      ).toBe(true);
+    });
+
+    it("warns on uppercase tool name", () => {
+      const result = validate(
+        makeSpec({
+          tools: [
+            {
+              name: "GetWeather",
+              description: "x",
+              inputSchema: { type: "object" },
+            },
+          ],
+        }),
+      );
+      expect(
+        result.diagnostics.some((d) => d.message.includes("uppercase")),
+      ).toBe(true);
+    });
+
+    it("errors on tool name with whitespace", () => {
+      const result = validate(
+        makeSpec({
+          tools: [
+            {
+              name: "get weather",
+              description: "x",
+              inputSchema: { type: "object" },
+            },
+          ],
+        }),
+      );
+      expect(result.valid).toBe(false);
+      expect(
+        result.diagnostics.some((d) => d.message.includes("whitespace")),
+      ).toBe(true);
+    });
   });
 
   // Resources
@@ -164,6 +240,83 @@ describe("validate", () => {
       expect(result.valid).toBe(true);
       expect(
         result.diagnostics.some((d) => d.severity === "warning"),
+      ).toBe(true);
+    });
+
+    it("warns on resource URI without scheme", () => {
+      const result = validate(
+        makeSpec({
+          resources: [{ uri: "/no-scheme", name: "A", description: "x" }],
+        }),
+      );
+      expect(
+        result.diagnostics.some((d) => d.message.includes("no scheme")),
+      ).toBe(true);
+    });
+  });
+
+  // Resource templates
+  describe("resource templates", () => {
+    it("errors on missing uriTemplate", () => {
+      const result = validate(
+        makeSpec({
+          resourceTemplates: [
+            { uriTemplate: "", name: "T", description: "x" } as any,
+          ],
+        }),
+      );
+      expect(result.valid).toBe(false);
+    });
+
+    it("errors on duplicate uriTemplates", () => {
+      const result = validate(
+        makeSpec({
+          resourceTemplates: [
+            { uriTemplate: "test://{id}", name: "A", description: "x" },
+            { uriTemplate: "test://{id}", name: "B", description: "y" },
+          ],
+        }),
+      );
+      expect(result.valid).toBe(false);
+      expect(
+        result.diagnostics.some((d) => d.message.includes("Duplicate")),
+      ).toBe(true);
+    });
+
+    it("warns on uriTemplate without variables", () => {
+      const result = validate(
+        makeSpec({
+          resourceTemplates: [
+            { uriTemplate: "test://static", name: "A", description: "x" },
+          ],
+        }),
+      );
+      expect(
+        result.diagnostics.some((d) => d.message.includes("no template variables")),
+      ).toBe(true);
+    });
+
+    it("errors on missing resource template name", () => {
+      const result = validate(
+        makeSpec({
+          resourceTemplates: [
+            { uriTemplate: "test://{id}", name: "", description: "x" } as any,
+          ],
+        }),
+      );
+      expect(result.valid).toBe(false);
+    });
+
+    it("warns on missing resource template description", () => {
+      const result = validate(
+        makeSpec({
+          resourceTemplates: [
+            { uriTemplate: "test://{id}", name: "A" },
+          ],
+        }),
+      );
+      expect(
+        result.diagnostics.some((d) => d.severity === "warning" && d.message.includes("description")),
       ).toBe(true);
     });
   });
@@ -231,6 +384,25 @@ describe("validate", () => {
         }),
       );
       expect(result.valid).toBe(false);
+    });
+
+    it("warns on missing prompt argument description", () => {
+      const result = validate(
+        makeSpec({
+          prompts: [
+            {
+              name: "foo",
+              description: "x",
+              arguments: [{ name: "input", required: true }],
+            },
+          ],
+        }),
+      );
+      expect(
+        result.diagnostics.some(
+          (d) => d.severity === "warning" && d.message.includes("argument") && d.message.includes("description"),
+        ),
+      ).toBe(true);
     });
   });
 });

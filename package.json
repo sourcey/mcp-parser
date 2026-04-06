@@ -1,6 +1,6 @@
 {
   "name": "mcp-parser",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Parse, validate, and snapshot Model Context Protocol servers.",
   "type": "module",
   "engines": {
@@ -57,6 +57,6 @@
   },
   "homepage": "https://github.com/sourcey/mcp-parser",
   "dependencies": {
-    "mcp-schema": "^0.2.0"
+    "mcp-schema": "^0.3.0"
   }
 }
