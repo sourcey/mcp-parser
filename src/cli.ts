@@ -105,7 +105,7 @@ async function cmdValidate(): Promise<void> {
   const result = validate(spec);
 
   if (result.diagnostics.length === 0) {
-    console.log("Valid — no issues found.");
+    console.log("Valid: no issues found.");
     return;
   }
 
