@@ -19,7 +19,7 @@
  * @packageDocumentation
  */
 
-// Re-export all types from mcp-spec for convenience
+// Re-export all types from mcp-schema for convenience
 export type {
   McpSpec,
   McpTool,

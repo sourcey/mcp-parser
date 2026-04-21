@@ -71,7 +71,7 @@ Options:
 Parse a JSON string directly.
 
 ```typescript
-const spec = parseString('{ "mcpSpec": "0.2.0", ... }');
+const spec = parseString('{ "mcpSpec": "0.3.1", ... }');
 ```
 
 ### `validate(spec)`
