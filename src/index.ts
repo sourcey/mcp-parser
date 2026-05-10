@@ -1,18 +1,18 @@
 /**
- * mcp-parser — Parse, validate, and snapshot Model Context Protocol servers.
+ * mcp-parser: snapshot, parse, validate, and document Model Context Protocol servers.
  *
- * The swagger-parser for MCP.
+ * Static contract tooling for MCP server surfaces.
  *
  * @example
  * ```ts
- * import { parse, validate, generateLlmsTxt } from "mcp-parser";
+ * import { parse, validate, generateMarkdown } from "mcp-parser";
  *
  * const spec = await parse("./mcp.json");
  * const result = validate(spec);
  *
  * if (result.valid) {
- *   const llmsTxt = generateLlmsTxt(spec);
- *   console.log(llmsTxt);
+ *   const markdown = generateMarkdown(spec);
+ *   console.log(markdown);
  * }
  * ```
  *

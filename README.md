@@ -4,7 +4,7 @@
 [![npm](https://img.shields.io/npm/v/mcp-parser)](https://www.npmjs.com/package/mcp-parser)
 [![license](https://img.shields.io/npm/l/mcp-parser)](https://github.com/sourcey/mcp-parser/blob/main/LICENSE)
 
-Parse, validate, and snapshot [Model Context Protocol](https://modelcontextprotocol.io) servers.
+Snapshot, parse, validate, and document [Model Context Protocol](https://modelcontextprotocol.io) servers.
 
 ## MCP Protocol Compatibility
 
@@ -28,9 +28,12 @@ npm install mcp-parser
 ## Quick Start
 
 ```typescript
-import { parse, validate, generateLlmsTxt } from "mcp-parser";
+import { snapshot, validate, generateMarkdown } from "mcp-parser";
+import { writeFile } from "node:fs/promises";
 
-const spec = await parse("./mcp.json");
+const spec = await snapshot({
+  transport: { type: "stdio", command: "node", args: ["server.js"] },
+});
 
 const result = validate(spec);
 if (!result.valid) {
@@ -39,14 +42,15 @@ if (!result.valid) {
   }
 }
 
-const llmsTxt = generateLlmsTxt(spec);
+await writeFile("mcp.json", JSON.stringify(spec, null, 2));
+await writeFile("mcp.md", generateMarkdown(spec));
 ```
 
 ## What is mcp.json?
 
 A static snapshot of an MCP server's capabilities: its tools, resources, and prompts. Think of it as `openapi.json` for MCP servers.
 
-MCP servers describe themselves at runtime via [`tools/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#listing-tools), [`resources/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/resources#listing-resources), and [`prompts/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/prompts#listing-prompts). An `mcp.json` captures that in a versionable file for documentation, validation, and code generation.
+MCP servers describe themselves at runtime via [`tools/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#listing-tools), [`resources/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/resources#listing-resources), and [`prompts/list`](https://modelcontextprotocol.io/specification/2025-11-25/server/prompts#listing-prompts). An `mcp.json` captures that live surface in a versionable file for documentation, validation, diffing, and tooling that should not need a running server.
 
 See [mcp-schema](https://github.com/sourcey/mcp-schema) for the full type definitions and JSON Schema.
 
@@ -119,9 +123,13 @@ await writeFile("mcp.json", JSON.stringify(spec, null, 2));
 
 All transports support an optional `timeout` (default: 30s). SSE and HTTP transports accept a `headers` object for authentication.
 
+### `generateMarkdown(spec)`
+
+Generate a full markdown reference document.
+
 ### `generateLlmsTxt(spec, baseUrl?)`
 
-Generate an [llms.txt](https://llmstxt.org) index file for LLM discovery.
+Generate a compact [llms.txt](https://llmstxt.org)-style index. This is a compatibility export for tools and docs sites that already consume the convention, not a guarantee that model providers will discover or fetch it automatically.
 
 ```typescript
 const txt = generateLlmsTxt(spec, "https://docs.example.com");
@@ -129,15 +137,11 @@ const txt = generateLlmsTxt(spec, "https://docs.example.com");
 
 ### `generateLlmsFullTxt(spec)`
 
-Generate a complete markdown reference for large-context LLMs.
+Generate a complete markdown reference with the server context inline.
 
 ```typescript
 const full = generateLlmsFullTxt(spec);
 ```
-
-### `generateMarkdown(spec)`
-
-Generate a full markdown reference document.
 
 ## CLI
 
@@ -160,10 +164,13 @@ mcp-parser snapshot --http http://localhost:3000/mcp -o mcp.json
 # With auth headers
 mcp-parser snapshot --sse http://localhost:3000/sse --header "Authorization:Bearer tok" -o mcp.json
 
-# Generate llms.txt
+# Generate markdown reference (default)
+mcp-parser generate ./mcp.json -o mcp.md
+
+# Generate compact context index
 mcp-parser generate ./mcp.json --format llms-txt -o llms.txt
 
-# Generate full reference
+# Generate full context reference
 mcp-parser generate ./mcp.json --format llms-full-txt -o llms-full.txt
 ```
 

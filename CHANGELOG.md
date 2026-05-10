@@ -2,6 +2,15 @@
 
 All notable changes to `mcp-parser` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org).
 
+## [0.4.0] - 2026-05-10
+
+### Added
+- `mcp-parser generate --format markdown` for explicit markdown reference generation.
+
+### Changed
+- `mcp-parser generate` now defaults to markdown output instead of `llms-txt`, matching the package's docs-first positioning. Use `--format llms-txt` or `--format llms-full-txt` for context export files.
+- README, package metadata, and generator docs now frame `llms.txt` as a compatibility/context export rather than the primary output.
+
 ## [0.3.1] - 2026-04-21
 
 ### Changed

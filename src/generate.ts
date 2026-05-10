@@ -16,10 +16,11 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Generate an llms.txt file from an McpSpec.
+ * Generate an llms.txt file from a McpSpec.
  *
- * The llms.txt format is a concise, LLM-friendly index of a project's
- * documentation — similar to robots.txt but for AI agents.
+ * The llms.txt format is a concise markdown index of a project's
+ * documentation. It is useful as a compatibility export for tools and
+ * documentation sites that already consume the convention.
  *
  * @param spec - The MCP spec to generate from
  * @param baseUrl - Optional base URL for linking to hosted docs
@@ -99,9 +100,9 @@ export function generateLlmsTxt(spec: McpSpec, baseUrl?: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Generate an llms-full.txt file — complete documentation as markdown.
+ * Generate an llms-full.txt file as complete markdown documentation.
  *
- * This is the full reference for LLMs with large context windows.
+ * This is the full reference with all server context inline.
  *
  * @param spec - The MCP spec to generate from
  */
@@ -164,7 +165,7 @@ export function generateLlmsFullTxt(spec: McpSpec): string {
  * @param spec - The MCP spec to generate from
  */
 export function generateMarkdown(spec: McpSpec): string {
-  // Same as llms-full.txt but with richer formatting
+  // Alias for the full markdown reference.
   return generateLlmsFullTxt(spec);
 }
 
