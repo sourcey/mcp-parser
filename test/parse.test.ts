@@ -156,4 +156,35 @@ describe("$ref dereferencing", () => {
     const fooProp = spec.tools![0].inputSchema.properties!.foo;
     expect(fooProp).toHaveProperty("$ref", "#/$defs/Missing");
   });
+
+  it("resolves escaped JSON Pointer tokens in $defs refs", () => {
+    const spec = parseString(
+      JSON.stringify({
+        mcpSpec: "0.1.0",
+        server: { name: "test", version: "1.0.0" },
+        $defs: {
+          "Address/Primary": { type: "string" },
+          "Name~Display": { type: "string" },
+        },
+        tools: [
+          {
+            name: "profile",
+            inputSchema: {
+              type: "object",
+              properties: {
+                address: { $ref: "#/$defs/Address~1Primary" },
+                displayName: { $ref: "#/$defs/Name~0Display" },
+              },
+            },
+          },
+        ],
+      }),
+    );
+
+    const properties = spec.tools![0].inputSchema.properties!;
+    expect(properties.address).not.toHaveProperty("$ref");
+    expect(properties.address).toHaveProperty("type", "string");
+    expect(properties.displayName).not.toHaveProperty("$ref");
+    expect(properties.displayName).toHaveProperty("type", "string");
+  });
 });
