@@ -2,6 +2,22 @@
 
 All notable changes to `mcp-parser` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org).
 
+## [0.4.1] - 2026-07-30
+
+### Fixed
+- `snapshot` requested protocol revision `2025-03-26` and never sent the `MCP-Protocol-Version` header. It now requests `2025-11-25` from a single exported constant and sends the header on both HTTP transports.
+- Paginated `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list` results were truncated to the first page without saying so. Every page is now followed, treating an empty-string cursor as a valid continuation, and a snapshot stopped by the page bound records `x-mcp-parser-incomplete` instead of presenting a partial list as complete.
+- Streamable HTTP ignored server-minted sessions, so stateful servers failed after `initialize`. `Mcp-Session-Id` is now captured, echoed on later requests, and released on close.
+- `clientInfo` reported a hardcoded version; it now comes from the package manifest.
+- `McpIcon` was not re-exported, and icons were neither validated nor rendered.
+
+### Added
+- First tests for `snapshot`, covering all three transports against in-process servers.
+- `MCP_PROTOCOL_VERSION`, `MCP_PARSER_CLIENT_INFO`, and `LIST_PAGE_LIMIT` exports.
+
+### Changed
+- README states the revision the client requests and the transports it implements, replacing a claim of support for all released protocol versions.
+
 ## [0.4.0] - 2026-05-10
 
 ### Added

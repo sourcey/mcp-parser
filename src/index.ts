@@ -32,10 +32,18 @@ export type {
   McpServerInfo,
   McpCapabilities,
   McpTransport,
+  McpIcon,
   JsonSchema,
 } from "mcp-schema";
 
 export { MCP_SPEC_VERSION, mcpSpecSchema } from "mcp-schema";
+
+// Protocol identity
+export {
+  LIST_PAGE_LIMIT,
+  MCP_PARSER_CLIENT_INFO,
+  MCP_PROTOCOL_VERSION,
+} from "./protocol.js";
 
 // Parser
 export { parse, parseString, McpParseError } from "./parse.js";

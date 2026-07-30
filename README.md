@@ -8,16 +8,21 @@ Snapshot, parse, validate, and document [Model Context Protocol](https://modelco
 
 ## MCP Protocol Compatibility
 
-Built against the [MCP specification](https://github.com/modelcontextprotocol/specification). Supports all released protocol versions:
+`snapshot` requests protocol revision [`2025-11-25`](https://modelcontextprotocol.io/specification/2025-11-25) during `initialize`, sends it as the `MCP-Protocol-Version` header on HTTP transports, and records whatever revision the server answers with as `mcpVersion`. Servers that negotiate an older revision are snapshotted at the revision they return.
 
-| Protocol Version | Status |
-|------------------|--------|
-| [`2025-11-25`](https://modelcontextprotocol.io/specification/2025-11-25) | Current stable |
-| [`2025-06-18`](https://modelcontextprotocol.io/specification/2025-06-18) | Supported |
-| [`2025-03-26`](https://modelcontextprotocol.io/specification/2025-03-26) | Supported |
-| [`2024-11-05`](https://modelcontextprotocol.io/specification/2024-11-05) | Supported |
+Parsing, validation, and generation are revision-independent: they read an `mcp.json` document, whatever revision produced it.
 
-All three MCP transports are supported: [stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio), [SSE](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#backwards-compatibility), and [streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http).
+Transports:
+
+| Transport | Support |
+|-----------|---------|
+| [stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio) | Full |
+| [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http) | Full, including server-minted sessions (`Mcp-Session-Id`) |
+| [HTTP+SSE](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#backwards-compatibility) | Full. Deprecated by the specification; prefer Streamable HTTP |
+
+Paginated `tools/list`, `resources/list`, `resources/templates/list`, and `prompts/list` results are followed to the last page. A snapshot stopped early by the page bound records `x-mcp-parser-incomplete` rather than presenting a partial list as complete.
+
+Not implemented: `tools/call`, `resources/read`, `prompts/get`, completions, and the client features the specification deprecated in `2026-07-28` (roots, sampling, logging). This package describes a server's surface; it does not exercise it.
 
 ## Install
 
@@ -97,7 +102,7 @@ Checks for:
 
 ### `snapshot(options)`
 
-Connect to a running MCP server and capture a static snapshot. Supports all three MCP [transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
+Connect to a running MCP server and capture a static snapshot over any of the three MCP [transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 
 ```typescript
 import { snapshot } from "mcp-parser";
@@ -176,7 +181,8 @@ mcp-parser generate ./mcp.json --format llms-full-txt -o llms-full.txt
 
 ## MCP Specification Resources
 
-- [MCP Specification](https://modelcontextprotocol.io/specification/2025-11-25) (current stable)
+- [MCP Specification](https://modelcontextprotocol.io/specification/2026-07-28) (current revision)
+- [MCP Specification `2025-11-25`](https://modelcontextprotocol.io/specification/2025-11-25) (the revision this client requests)
 - [Specification repo](https://github.com/modelcontextprotocol/specification) (includes JSON Schema for each protocol version)
 - [TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) (`@modelcontextprotocol/sdk`)
 - [Python SDK](https://github.com/modelcontextprotocol/python-sdk) (`mcp` on PyPI)

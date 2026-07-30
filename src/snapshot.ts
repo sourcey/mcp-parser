@@ -16,6 +16,11 @@ import type {
   McpServerInfo,
 } from "mcp-schema";
 import { MCP_SPEC_VERSION } from "mcp-schema";
+import {
+  LIST_PAGE_LIMIT,
+  MCP_PARSER_CLIENT_INFO,
+  MCP_PROTOCOL_VERSION,
+} from "./protocol.js";
 
 // ---------------------------------------------------------------------------
 // JSON-RPC helpers
@@ -75,6 +80,11 @@ export interface SnapshotOptions {
   transport: SnapshotTransport;
   /** Timeout in milliseconds. Default: 30000. */
   timeout?: number;
+  /**
+   * Maximum pages read per paginated list. Default: {@link LIST_PAGE_LIMIT}.
+   * A snapshot stopped by this bound records `x-mcp-parser-incomplete`.
+   */
+  pageLimit?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,15 +97,61 @@ interface McpConnection {
   close: () => void;
 }
 
+interface ListPage {
+  nextCursor?: unknown;
+  [key: string]: unknown;
+}
+
+interface ListOutcome<T> {
+  items: T[];
+  /** True when the page limit stopped the walk before the server ran out. */
+  truncated: boolean;
+}
+
+/**
+ * Walk every page of a paginated list method.
+ *
+ * Cursors are opaque: only the presence of a string `nextCursor` means more
+ * results exist, so an empty string is a valid cursor and must not end the
+ * walk. A snapshot that stops early records that fact rather than presenting a
+ * partial list as complete.
+ */
+async function listAll<T>(
+  conn: McpConnection,
+  method: string,
+  key: string,
+  pageLimit: number,
+): Promise<ListOutcome<T>> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < pageLimit; page += 1) {
+    const result = (await conn.send(
+      method,
+      cursor === undefined ? undefined : { cursor },
+    )) as ListPage | null;
+
+    const entries = result?.[key];
+    if (Array.isArray(entries)) items.push(...(entries as T[]));
+
+    const next = result?.nextCursor;
+    if (typeof next !== "string") return { items, truncated: false };
+    cursor = next;
+  }
+
+  return { items, truncated: true };
+}
+
 async function introspect(
   conn: McpConnection,
   transport: SnapshotTransport,
+  pageLimit: number,
 ): Promise<McpSpec> {
   try {
     const initResult = (await conn.send("initialize", {
-      protocolVersion: "2025-03-26",
+      protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: "mcp-parser", version: "0.1.0" },
+      clientInfo: MCP_PARSER_CLIENT_INFO,
     })) as {
       protocolVersion?: string;
       serverInfo?: McpServerInfo;
@@ -110,34 +166,50 @@ async function introspect(
 
     const [toolsResult, resourcesResult, templatesResult, promptsResult] =
       await Promise.allSettled([
-        capabilities?.tools ? conn.send("tools/list") : Promise.resolve(null),
-        capabilities?.resources ? conn.send("resources/list") : Promise.resolve(null),
-        capabilities?.resources
-          ? conn.send("resources/templates/list")
+        capabilities?.tools
+          ? listAll<McpTool>(conn, "tools/list", "tools", pageLimit)
           : Promise.resolve(null),
-        capabilities?.prompts ? conn.send("prompts/list") : Promise.resolve(null),
+        capabilities?.resources
+          ? listAll<McpResource>(conn, "resources/list", "resources", pageLimit)
+          : Promise.resolve(null),
+        capabilities?.resources
+          ? listAll<McpResourceTemplate>(
+              conn,
+              "resources/templates/list",
+              "resourceTemplates",
+              pageLimit,
+            )
+          : Promise.resolve(null),
+        capabilities?.prompts
+          ? listAll<McpPrompt>(conn, "prompts/list", "prompts", pageLimit)
+          : Promise.resolve(null),
       ]);
 
-    const tools =
-      toolsResult.status === "fulfilled" && toolsResult.value
-        ? ((toolsResult.value as { tools?: McpTool[] }).tools ?? [])
-        : undefined;
+    const settled = <T>(
+      outcome: PromiseSettledResult<ListOutcome<T> | null>,
+    ): ListOutcome<T> | undefined =>
+      outcome.status === "fulfilled" && outcome.value ? outcome.value : undefined;
 
-    const resources =
-      resourcesResult.status === "fulfilled" && resourcesResult.value
-        ? ((resourcesResult.value as { resources?: McpResource[] }).resources ?? [])
-        : undefined;
+    const toolList = settled<McpTool>(toolsResult);
+    const resourceList = settled<McpResource>(resourcesResult);
+    const templateList = settled<McpResourceTemplate>(templatesResult);
+    const promptList = settled<McpPrompt>(promptsResult);
 
-    const resourceTemplates =
-      templatesResult.status === "fulfilled" && templatesResult.value
-        ? ((templatesResult.value as { resourceTemplates?: McpResourceTemplate[] })
-            .resourceTemplates ?? [])
-        : undefined;
+    const tools = toolList?.items;
+    const resources = resourceList?.items;
+    const resourceTemplates = templateList?.items;
+    const prompts = promptList?.items;
 
-    const prompts =
-      promptsResult.status === "fulfilled" && promptsResult.value
-        ? ((promptsResult.value as { prompts?: McpPrompt[] }).prompts ?? [])
-        : undefined;
+    const truncated = (
+      [
+        ["tools", toolList],
+        ["resources", resourceList],
+        ["resourceTemplates", templateList],
+        ["prompts", promptList],
+      ] as const
+    )
+      .filter(([, outcome]) => outcome?.truncated)
+      .map(([name]) => name);
 
     const transportHint =
       transport.type === "stdio"
@@ -158,6 +230,10 @@ async function introspect(
       ...(resources?.length && { resources }),
       ...(resourceTemplates?.length && { resourceTemplates }),
       ...(prompts?.length && { prompts }),
+      // An incomplete snapshot says so. Absent means every page was read.
+      ...(truncated.length > 0 && {
+        "x-mcp-parser-incomplete": { pageLimitReached: truncated, pageLimit },
+      }),
     };
   } finally {
     conn.close();
@@ -193,6 +269,7 @@ async function introspect(
  */
 export async function snapshot(options: SnapshotOptions): Promise<McpSpec> {
   const timeout = options.timeout ?? 30_000;
+  const pageLimit = options.pageLimit ?? LIST_PAGE_LIMIT;
   const transport = options.transport;
 
   let conn: McpConnection;
@@ -212,7 +289,7 @@ export async function snapshot(options: SnapshotOptions): Promise<McpSpec> {
       );
   }
 
-  return introspect(conn, transport);
+  return introspect(conn, transport, pageLimit);
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +385,7 @@ async function connectSse(
   const sseResponse = await fetch(transport.url, {
     headers: {
       Accept: "text/event-stream",
+      "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
       ...transport.headers,
     },
     signal: controller.signal,
@@ -401,6 +479,7 @@ async function connectSse(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
             ...transport.headers,
           },
           body: JSON.stringify(request),
@@ -424,6 +503,7 @@ async function connectSse(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
           ...transport.headers,
         },
         body: JSON.stringify(msg),
@@ -444,6 +524,22 @@ function connectStreamableHttp(
   timeout: number,
 ): McpConnection {
   let nextId = 1;
+  /**
+   * Session id minted by the server on initialize. Stateful servers require it
+   * on every subsequent request and release it on DELETE. Servers that mint
+   * none stay stateless and this remains null.
+   */
+  let sessionId: string | null = null;
+
+  function requestHeaders(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+      ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
+      ...transport.headers,
+    };
+  }
 
   return {
     async send(method, params) {
@@ -461,16 +557,15 @@ function connectStreamableHttp(
       try {
         const response = await fetch(transport.url, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json, text/event-stream",
-            ...transport.headers,
-          },
+          headers: requestHeaders(),
           body: JSON.stringify(request),
           signal: controller.signal,
         });
 
         clearTimeout(timer);
+
+        const mintedSession = response.headers.get("mcp-session-id");
+        if (mintedSession) sessionId = mintedSession;
 
         if (!response.ok) {
           throw new McpSnapshotError(
@@ -543,15 +638,18 @@ function connectStreamableHttp(
       if (params) msg.params = params;
       fetch(transport.url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...transport.headers,
-        },
+        headers: requestHeaders(),
         body: JSON.stringify(msg),
       }).catch(() => {});
     },
     close() {
-      // Stateless, nothing to close
+      // Release the server's session if it minted one; stateless servers have
+      // nothing to close.
+      if (!sessionId) return;
+      void fetch(transport.url, {
+        method: "DELETE",
+        headers: requestHeaders(),
+      }).catch(() => {});
     },
   };
 }

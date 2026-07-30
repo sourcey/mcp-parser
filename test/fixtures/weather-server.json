@@ -1,19 +1,35 @@
 {
-  "mcpSpec": "0.1.0",
-  "mcpVersion": "2025-03-26",
+  "mcpSpec": "0.3.2",
+  "mcpVersion": "2025-11-25",
   "server": {
     "name": "weather-server",
-    "version": "1.2.0"
+    "version": "1.2.0",
+    "icons": [
+      {
+        "src": "https://weather.example/icon.svg",
+        "mimeType": "image/svg+xml",
+        "sizes": [
+          "any"
+        ]
+      }
+    ]
   },
   "description": "Real-time weather data and forecasts for any city worldwide.",
   "capabilities": {
-    "tools": { "listChanged": false },
-    "resources": { "subscribe": false, "listChanged": false }
+    "tools": {
+      "listChanged": false
+    },
+    "resources": {
+      "subscribe": false,
+      "listChanged": false
+    }
   },
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["weather-mcp-server"]
+    "args": [
+      "weather-mcp-server"
+    ]
   },
   "tools": [
     {
@@ -28,27 +44,52 @@
           },
           "units": {
             "type": "string",
-            "enum": ["celsius", "fahrenheit"],
+            "enum": [
+              "celsius",
+              "fahrenheit"
+            ],
             "default": "celsius",
             "description": "Temperature units"
           }
         },
-        "required": ["city"]
+        "required": [
+          "city"
+        ]
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "temperature": { "type": "number" },
-          "conditions": { "type": "string" },
-          "humidity": { "type": "number" },
-          "wind_speed": { "type": "number" }
+          "temperature": {
+            "type": "number"
+          },
+          "conditions": {
+            "type": "string"
+          },
+          "humidity": {
+            "type": "number"
+          },
+          "wind_speed": {
+            "type": "number"
+          }
         },
-        "required": ["temperature", "conditions"]
+        "required": [
+          "temperature",
+          "conditions"
+        ]
       },
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": true
-      }
+      },
+      "icons": [
+        {
+          "src": "https://weather.example/tools/current.png",
+          "sizes": [
+            "48x48"
+          ],
+          "theme": "light"
+        }
+      ]
     },
     {
       "name": "get_forecast",
@@ -68,7 +109,9 @@
             "description": "Number of days to forecast"
           }
         },
-        "required": ["city"]
+        "required": [
+          "city"
+        ]
       },
       "annotations": {
         "readOnlyHint": true,
@@ -87,7 +130,13 @@
           },
           "condition": {
             "type": "string",
-            "enum": ["rain", "snow", "extreme_heat", "extreme_cold", "storm"],
+            "enum": [
+              "rain",
+              "snow",
+              "extreme_heat",
+              "extreme_cold",
+              "storm"
+            ],
             "description": "Weather condition to alert on"
           },
           "webhook_url": {
@@ -96,7 +145,11 @@
             "description": "URL to POST when alert triggers"
           }
         },
-        "required": ["city", "condition", "webhook_url"]
+        "required": [
+          "city",
+          "condition",
+          "webhook_url"
+        ]
       },
       "annotations": {
         "readOnlyHint": false,

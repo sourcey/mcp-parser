@@ -3,12 +3,13 @@
  */
 
 import type {
-  McpSpec,
-  McpTool,
+  JsonSchema,
+  McpIcon,
+  McpPrompt,
   McpResource,
   McpResourceTemplate,
-  McpPrompt,
-  JsonSchema,
+  McpSpec,
+  McpTool,
 } from "mcp-schema";
 
 // ---------------------------------------------------------------------------
@@ -219,6 +220,8 @@ function formatTool(tool: McpTool): string[] {
     lines.push("");
   }
 
+  lines.push(...formatIcons(tool.icons));
+
   return lines;
 }
 
@@ -233,6 +236,7 @@ function formatResource(resource: McpResource): string[] {
     lines.push(resource.description);
     lines.push("");
   }
+  lines.push(...formatIcons(resource.icons));
   return lines;
 }
 
@@ -247,6 +251,7 @@ function formatResourceTemplate(template: McpResourceTemplate): string[] {
     lines.push(template.description);
     lines.push("");
   }
+  lines.push(...formatIcons(template.icons));
   return lines;
 }
 
@@ -273,7 +278,22 @@ function formatPrompt(prompt: McpPrompt): string[] {
     lines.push("");
   }
 
+  lines.push(...formatIcons(prompt.icons));
+
   return lines;
+}
+
+/**
+ * Icons render as a plain list of links, since a markdown reference cannot
+ * usefully embed an icon but a reader may still want the asset.
+ */
+function formatIcons(icons: McpIcon[] | undefined): string[] {
+  if (!icons?.length) return [];
+  const rendered = icons.map((icon) => {
+    const detail = [icon.theme, icon.sizes?.join(" ")].filter(Boolean).join(", ");
+    return detail ? `[icon](${icon.src}) (${detail})` : `[icon](${icon.src})`;
+  });
+  return [`Icons: ${rendered.join(" · ")}`, ""];
 }
 
 function formatType(schema: JsonSchema): string {

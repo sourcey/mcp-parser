@@ -2,7 +2,14 @@
  * Validate MCP spec documents against the schema.
  */
 
-import type { McpSpec, McpTool, McpResource, McpResourceTemplate, McpPrompt } from "mcp-schema";
+import type {
+  McpIcon,
+  McpPrompt,
+  McpResource,
+  McpResourceTemplate,
+  McpSpec,
+  McpTool,
+} from "mcp-schema";
 
 /** A single validation diagnostic. */
 export interface ValidationDiagnostic {
@@ -93,6 +100,8 @@ export function validate(spec: McpSpec): ValidationResult {
   }
 
   // Validate tools
+  validateIcons(spec.server?.icons, "server", diagnostics);
+
   if (spec.tools) {
     const toolNames = new Set<string>();
     for (let i = 0; i < spec.tools.length; i++) {
@@ -136,6 +145,58 @@ export function validate(spec: McpSpec): ValidationResult {
     valid: !diagnostics.some((d) => d.severity === "error"),
     diagnostics,
   };
+}
+
+/**
+ * Icons are declarable on the server and on every tool, resource, template, and
+ * prompt, so one checker serves all five surfaces.
+ */
+function validateIcons(
+  icons: McpIcon[] | undefined,
+  path: string,
+  diagnostics: ValidationDiagnostic[],
+): void {
+  if (!icons) return;
+
+  for (let i = 0; i < icons.length; i++) {
+    const icon = icons[i];
+    const iconPath = `${path}.icons[${i}]`;
+
+    if (!icon?.src) {
+      diagnostics.push({
+        severity: "error",
+        path: `${iconPath}.src`,
+        message: "Icon is missing a src",
+      });
+      continue;
+    }
+
+    if (!/^(?:https?:\/\/|data:)/.test(icon.src)) {
+      diagnostics.push({
+        severity: "error",
+        path: `${iconPath}.src`,
+        message: `Icon src must be an http(s) or data URI: "${icon.src}"`,
+      });
+    }
+
+    for (const size of icon.sizes ?? []) {
+      if (size !== "any" && !/^\d+x\d+$/.test(size)) {
+        diagnostics.push({
+          severity: "warning",
+          path: `${iconPath}.sizes`,
+          message: `Icon size should be "WxH" or "any": "${size}"`,
+        });
+      }
+    }
+
+    if (icon.theme !== undefined && icon.theme !== "light" && icon.theme !== "dark") {
+      diagnostics.push({
+        severity: "error",
+        path: `${iconPath}.theme`,
+        message: `Icon theme must be "light" or "dark": "${String(icon.theme)}"`,
+      });
+    }
+  }
 }
 
 function validateTool(
@@ -218,6 +279,8 @@ function validateTool(
       message: `Tool "${tool.name}" contains whitespace`,
     });
   }
+
+  validateIcons(tool.icons, path, diagnostics);
 }
 
 function validateResource(
@@ -266,6 +329,8 @@ function validateResource(
       message: `Resource "${resource.name}" has no description`,
     });
   }
+
+  validateIcons(resource.icons, path, diagnostics);
 }
 
 function validatePrompt(
@@ -327,6 +392,8 @@ function validatePrompt(
       }
     }
   }
+
+  validateIcons(prompt.icons, path, diagnostics);
 }
 
 function validateResourceTemplate(
@@ -377,4 +444,6 @@ function validateResourceTemplate(
       message: `Resource template "${template.name}" has no description`,
     });
   }
+
+  validateIcons(template.icons, path, diagnostics);
 }

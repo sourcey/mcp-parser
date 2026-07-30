@@ -1,13 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { resolve } from "node:path";
+import { MCP_SPEC_VERSION } from "mcp-schema";
 import { parse, parseString, McpParseError } from "../src/parse.js";
+import { MCP_PROTOCOL_VERSION } from "../src/protocol.js";
 
 const FIXTURE = resolve(import.meta.dirname, "fixtures/weather-server.json");
 
 describe("parse", () => {
   it("parses a valid mcp.json file", async () => {
     const spec = await parse(FIXTURE);
-    expect(spec.mcpSpec).toBe("0.1.0");
+    // Asserted against the constants, so a version bump cannot leave the
+    // fixture behind unnoticed.
+    expect(spec.mcpSpec).toBe(MCP_SPEC_VERSION);
+    expect(spec.mcpVersion).toBe(MCP_PROTOCOL_VERSION);
     expect(spec.server.name).toBe("weather-server");
     expect(spec.server.version).toBe("1.2.0");
     expect(spec.tools).toHaveLength(3);
