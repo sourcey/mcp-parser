@@ -84,6 +84,10 @@ function dereferenceSpec(spec: McpSpec): McpSpec {
 
   const defs = spec.$defs;
 
+  function decodeJsonPointerToken(token: string): string {
+    return token.replace(/~1/g, "/").replace(/~0/g, "~");
+  }
+
   function resolveRefs(obj: unknown): unknown {
     if (typeof obj !== "object" || obj === null) return obj;
     if (Array.isArray(obj)) return obj.map(resolveRefs);
@@ -93,8 +97,11 @@ function dereferenceSpec(spec: McpSpec): McpSpec {
     if (typeof record.$ref === "string") {
       const refPath = record.$ref;
       const match = refPath.match(/^#\/\$defs\/(.+)$/);
-      if (match && defs[match[1]]) {
-        return resolveRefs(structuredClone(defs[match[1]]));
+      if (match) {
+        const defName = decodeJsonPointerToken(match[1]);
+        if (defs[defName]) {
+          return resolveRefs(structuredClone(defs[defName]));
+        }
       }
     }
 
