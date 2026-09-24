@@ -8,7 +8,12 @@ Snapshot, parse, validate, and document [Model Context Protocol](https://modelco
 
 ## MCP Protocol Compatibility
 
-`snapshot` requests protocol revision [`2025-11-25`](https://modelcontextprotocol.io/specification/2025-11-25) during `initialize`, sends it as the `MCP-Protocol-Version` header on HTTP transports, and records whatever revision the server answers with as `mcpVersion`. Servers that negotiate an older revision are snapshotted at the revision they return.
+`snapshot` requests protocol revision [`2025-11-25`](https://modelcontextprotocol.io/specification/2025-11-25) by default. Pass `protocolVersion` (or `--protocol-version`) to request another:
+
+- A handshake revision (`2025-11-25` and earlier) is offered in `initialize`. Later requests declare the revision the server negotiates in the `MCP-Protocol-Version` header, and the snapshot records it as `mcpVersion`.
+- A stateless revision ([`2026-07-28`](https://modelcontextprotocol.io/specification/2026-07-28) and later) is declared on every request in `_meta` and in headers, including `Mcp-Method` and `Mcp-Name`. The snapshot reads `server/discover` instead of `initialize` and records the server's supported revisions as `mcpVersions`.
+
+Snapshotting a server at each revision it claims to serve is a conformance check: a server that refuses a revision reports the ones it supports in the error.
 
 Parsing, validation, and generation are revision-independent: they read an `mcp.json` document, whatever revision produced it.
 

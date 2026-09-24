@@ -71,6 +71,7 @@ Examples:
   mcp-parser snapshot --stdio "node server.js" -o mcp.json
   mcp-parser snapshot --sse http://localhost:3000/sse -o mcp.json
   mcp-parser snapshot --http http://localhost:3000/mcp -o mcp.json
+  mcp-parser snapshot --http http://localhost:3000/mcp --protocol-version 2026-07-28
   mcp-parser generate ./mcp.json -o mcp.md
   mcp-parser generate ./mcp.json --format llms-txt -o llms.txt
 `);
@@ -148,11 +149,15 @@ async function cmdSnapshot(): Promise<void> {
     transport = { type: "streamable-http", url: args[httpIdx + 1], ...(Object.keys(headers).length && { headers }) };
     console.log(`Connecting via HTTP: ${args[httpIdx + 1]}...`);
   } else {
-    console.error("Usage: mcp-parser snapshot --stdio|--sse|--http <target> [-o output]");
+    console.error(
+      "Usage: mcp-parser snapshot --stdio|--sse|--http <target> [--protocol-version <YYYY-MM-DD>] [-o output]",
+    );
     process.exit(1);
   }
 
-  const spec = await snapshot({ transport });
+  const revisionIdx = args.indexOf("--protocol-version");
+  const protocolVersion = revisionIdx !== -1 ? args[revisionIdx + 1] : undefined;
+  const spec = await snapshot({ transport, ...(protocolVersion && { protocolVersion }) });
 
   await writeFile(output, JSON.stringify(spec, null, 2) + "\n");
   console.log(`Snapshot written to ${output}`);

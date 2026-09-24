@@ -1,6 +1,6 @@
 {
   "name": "mcp-parser",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Snapshot, parse, validate, and document Model Context Protocol servers.",
   "type": "module",
   "engines": {

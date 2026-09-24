@@ -20,6 +20,8 @@ import {
   LIST_PAGE_LIMIT,
   MCP_PARSER_CLIENT_INFO,
   MCP_PROTOCOL_VERSION,
+  isProtocolRevision,
+  isStatelessRevision,
 } from "./protocol.js";
 
 // ---------------------------------------------------------------------------
@@ -33,11 +35,29 @@ interface JsonRpcRequest {
   params?: Record<string, unknown>;
 }
 
+interface JsonRpcError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
 interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: number;
   result?: unknown;
-  error?: { code: number; message: string; data?: unknown };
+  error?: JsonRpcError;
+}
+
+/**
+ * Describe an RPC error, including the revisions a server says it supports
+ * when it refuses the one requested, so the caller can choose another.
+ */
+function rpcError(error: JsonRpcError): McpSnapshotError {
+  const data = error.data as { supported?: unknown } | undefined;
+  const supported = Array.isArray(data?.supported)
+    ? `; supported revisions: ${data.supported.join(", ")}`
+    : "";
+  return new McpSnapshotError(`RPC error: ${error.message} (${error.code})${supported}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -85,16 +105,46 @@ export interface SnapshotOptions {
    * A snapshot stopped by this bound records `x-mcp-parser-incomplete`.
    */
   pageLimit?: number;
+  /**
+   * Protocol revision to request. Default: {@link MCP_PROTOCOL_VERSION}.
+   *
+   * A handshake revision (`2025-11-25` and earlier) is offered in
+   * `initialize`, and later requests declare whatever the server negotiates.
+   * A stateless revision (`2026-07-28` and later) is declared on every
+   * request, and the server describes itself through `server/discover`.
+   */
+  protocolVersion?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Transport-agnostic introspection
 // ---------------------------------------------------------------------------
 
+type Send = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+
 interface McpConnection {
-  send: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+  send: Send;
   notify: (method: string, params?: Record<string, unknown>) => void;
   close: () => void;
+}
+
+/**
+ * The revision every request declares. A handshake revision starts as the one
+ * requested and becomes whatever `initialize` negotiates; a stateless revision
+ * holds for the whole snapshot.
+ */
+interface Negotiation {
+  version: string;
+  stateless: boolean;
+}
+
+/** What the server says about itself before any list is read. */
+interface Surface {
+  server: McpServerInfo;
+  capabilities?: McpCapabilities;
+  mcpVersion?: string;
+  mcpVersions?: string[];
+  send: Send;
 }
 
 interface ListPage {
@@ -117,7 +167,7 @@ interface ListOutcome<T> {
  * partial list as complete.
  */
 async function listAll<T>(
-  conn: McpConnection,
+  send: Send,
   method: string,
   key: string,
   pageLimit: number,
@@ -126,7 +176,7 @@ async function listAll<T>(
   let cursor: string | undefined;
 
   for (let page = 0; page < pageLimit; page += 1) {
-    const result = (await conn.send(
+    const result = (await send(
       method,
       cursor === undefined ? undefined : { cursor },
     )) as ListPage | null;
@@ -142,46 +192,95 @@ async function listAll<T>(
   return { items, truncated: true };
 }
 
+const UNKNOWN_SERVER: McpServerInfo = { name: "unknown", version: "0.0.0" };
+
+/** Handshake revisions: offer one in `initialize`, then use what comes back. */
+async function initialize(conn: McpConnection, negotiation: Negotiation): Promise<Surface> {
+  const initResult = (await conn.send("initialize", {
+    protocolVersion: negotiation.version,
+    capabilities: {},
+    clientInfo: MCP_PARSER_CLIENT_INFO,
+  })) as {
+    protocolVersion?: string;
+    serverInfo?: McpServerInfo;
+    capabilities?: McpCapabilities;
+  };
+
+  // Every later request, the initialized notification included, declares the
+  // negotiated revision rather than the one offered.
+  if (typeof initResult.protocolVersion === "string") {
+    negotiation.version = initResult.protocolVersion;
+  }
+  conn.notify("notifications/initialized");
+
+  return {
+    server: initResult.serverInfo ?? UNKNOWN_SERVER,
+    capabilities: initResult.capabilities,
+    mcpVersion: initResult.protocolVersion,
+    send: conn.send,
+  };
+}
+
+/** Stateless revisions: every request carries `_meta`; discovery replaces the handshake. */
+async function discover(conn: McpConnection, negotiation: Negotiation): Promise<Surface> {
+  const meta = {
+    "io.modelcontextprotocol/protocolVersion": negotiation.version,
+    "io.modelcontextprotocol/clientInfo": MCP_PARSER_CLIENT_INFO,
+    "io.modelcontextprotocol/clientCapabilities": {},
+  };
+  const send: Send = (method, params) => conn.send(method, { ...params, _meta: meta });
+
+  const result = (await send("server/discover")) as {
+    supportedVersions?: unknown;
+    capabilities?: McpCapabilities;
+    _meta?: Record<string, unknown>;
+  };
+  const server = result._meta?.["io.modelcontextprotocol/serverInfo"] as
+    | McpServerInfo
+    | undefined;
+  const supported = Array.isArray(result.supportedVersions)
+    ? result.supportedVersions.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+
+  return {
+    server: server ?? UNKNOWN_SERVER,
+    capabilities: result.capabilities,
+    // The server accepted the revision it was sent; that is the one spoken.
+    mcpVersion: negotiation.version,
+    ...(supported?.length && { mcpVersions: supported }),
+    send,
+  };
+}
+
 async function introspect(
   conn: McpConnection,
   transport: SnapshotTransport,
   pageLimit: number,
+  negotiation: Negotiation,
 ): Promise<McpSpec> {
   try {
-    const initResult = (await conn.send("initialize", {
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: MCP_PARSER_CLIENT_INFO,
-    })) as {
-      protocolVersion?: string;
-      serverInfo?: McpServerInfo;
-      capabilities?: McpCapabilities;
-    };
-
-    conn.notify("notifications/initialized");
-
-    const server = initResult.serverInfo ?? { name: "unknown", version: "0.0.0" };
-    const capabilities = initResult.capabilities;
-    const mcpVersion = initResult.protocolVersion;
+    const { server, capabilities, mcpVersion, mcpVersions, send } = negotiation.stateless
+      ? await discover(conn, negotiation)
+      : await initialize(conn, negotiation);
 
     const [toolsResult, resourcesResult, templatesResult, promptsResult] =
       await Promise.allSettled([
         capabilities?.tools
-          ? listAll<McpTool>(conn, "tools/list", "tools", pageLimit)
+          ? listAll<McpTool>(send, "tools/list", "tools", pageLimit)
           : Promise.resolve(null),
         capabilities?.resources
-          ? listAll<McpResource>(conn, "resources/list", "resources", pageLimit)
+          ? listAll<McpResource>(send, "resources/list", "resources", pageLimit)
           : Promise.resolve(null),
         capabilities?.resources
           ? listAll<McpResourceTemplate>(
-              conn,
+              send,
               "resources/templates/list",
               "resourceTemplates",
               pageLimit,
             )
           : Promise.resolve(null),
         capabilities?.prompts
-          ? listAll<McpPrompt>(conn, "prompts/list", "prompts", pageLimit)
+          ? listAll<McpPrompt>(send, "prompts/list", "prompts", pageLimit)
           : Promise.resolve(null),
       ]);
 
@@ -223,6 +322,7 @@ async function introspect(
     return {
       mcpSpec: MCP_SPEC_VERSION,
       ...(mcpVersion && { mcpVersion }),
+      ...(mcpVersions && { mcpVersions }),
       server,
       ...(capabilities && { capabilities }),
       transport: transportHint,
@@ -271,6 +371,14 @@ export async function snapshot(options: SnapshotOptions): Promise<McpSpec> {
   const timeout = options.timeout ?? 30_000;
   const pageLimit = options.pageLimit ?? LIST_PAGE_LIMIT;
   const transport = options.transport;
+  const requested = options.protocolVersion ?? MCP_PROTOCOL_VERSION;
+  if (!isProtocolRevision(requested)) {
+    throw new McpSnapshotError(`Protocol revision must be YYYY-MM-DD, got ${requested}`);
+  }
+  const negotiation: Negotiation = {
+    version: requested,
+    stateless: isStatelessRevision(requested),
+  };
 
   let conn: McpConnection;
   switch (transport.type) {
@@ -278,10 +386,15 @@ export async function snapshot(options: SnapshotOptions): Promise<McpSpec> {
       conn = connectStdio(transport, timeout);
       break;
     case "sse":
-      conn = await connectSse(transport, timeout);
+      if (negotiation.stateless) {
+        throw new McpSnapshotError(
+          `HTTP+SSE predates protocol revision ${requested}; use streamable-http`,
+        );
+      }
+      conn = await connectSse(transport, timeout, negotiation);
       break;
     case "streamable-http":
-      conn = connectStreamableHttp(transport, timeout);
+      conn = connectStreamableHttp(transport, timeout, negotiation);
       break;
     default:
       throw new McpSnapshotError(
@@ -289,7 +402,7 @@ export async function snapshot(options: SnapshotOptions): Promise<McpSpec> {
       );
   }
 
-  return introspect(conn, transport, pageLimit);
+  return introspect(conn, transport, pageLimit, negotiation);
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +435,7 @@ function connectStdio(transport: StdioTransport, timeout: number): McpConnection
           const p = pending.get(msg.id)!;
           pending.delete(msg.id);
           if (msg.error) {
-            p.reject(new McpSnapshotError(`RPC error: ${msg.error.message} (${msg.error.code})`));
+            p.reject(rpcError(msg.error));
           } else {
             p.resolve(msg.result);
           }
@@ -371,6 +484,7 @@ function connectStdio(transport: StdioTransport, timeout: number): McpConnection
 async function connectSse(
   transport: SseTransport,
   timeout: number,
+  negotiation: Negotiation,
 ): Promise<McpConnection> {
   const baseUrl = transport.url.replace(/\/sse\/?$/, "");
   let messageEndpoint: string | null = null;
@@ -385,7 +499,7 @@ async function connectSse(
   const sseResponse = await fetch(transport.url, {
     headers: {
       Accept: "text/event-stream",
-      "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+      "MCP-Protocol-Version": negotiation.version,
       ...transport.headers,
     },
     signal: controller.signal,
@@ -427,7 +541,7 @@ async function connectSse(
             const p = pending.get(msg.id)!;
             pending.delete(msg.id);
             if (msg.error) {
-              p.reject(new McpSnapshotError(`RPC error: ${msg.error.message} (${msg.error.code})`));
+              p.reject(rpcError(msg.error));
             } else {
               p.resolve(msg.result);
             }
@@ -479,7 +593,7 @@ async function connectSse(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+            "MCP-Protocol-Version": negotiation.version,
             ...transport.headers,
           },
           body: JSON.stringify(request),
@@ -503,7 +617,7 @@ async function connectSse(
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+          "MCP-Protocol-Version": negotiation.version,
           ...transport.headers,
         },
         body: JSON.stringify(msg),
@@ -519,9 +633,33 @@ async function connectSse(
 // Streamable HTTP transport
 // ---------------------------------------------------------------------------
 
+/**
+ * A header-safe rendering of a value mirrored from the body: plain visible
+ * ASCII as-is, anything else (or anything that looks like the sentinel) as the
+ * specification's `=?base64?…?=` form.
+ */
+function headerValue(value: string): string {
+  const plain = /^[\x21-\x7E](?:[\x20-\x7E]*[\x21-\x7E])?$/.test(value);
+  const sentinel = value.startsWith("=?base64?") && value.endsWith("?=");
+  return plain && !sentinel ? value : `=?base64?${Buffer.from(value, "utf8").toString("base64")}?=`;
+}
+
+/** Read a JSON-RPC error from a refused response, when the body holds one. */
+async function refusal(response: Response): Promise<McpSnapshotError> {
+  const status = `HTTP ${response.status}: ${response.statusText}`;
+  try {
+    const body = (await response.json()) as Partial<JsonRpcResponse>;
+    if (body?.error) return new McpSnapshotError(`${status} (${rpcError(body.error).message})`);
+  } catch {
+    // Not a JSON-RPC body; the status is all there is.
+  }
+  return new McpSnapshotError(status);
+}
+
 function connectStreamableHttp(
   transport: StreamableHttpTransport,
   timeout: number,
+  negotiation: Negotiation,
 ): McpConnection {
   let nextId = 1;
   /**
@@ -531,11 +669,21 @@ function connectStreamableHttp(
    */
   let sessionId: string | null = null;
 
-  function requestHeaders(): Record<string, string> {
+  function requestHeaders(
+    method?: string,
+    params?: Record<string, unknown>,
+  ): Record<string, string> {
+    // Stateless revisions mirror the method, and the tool, prompt, or resource
+    // it names, into headers that intermediaries can route on.
+    const name = params?.name ?? params?.uri;
     return {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
-      "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+      "MCP-Protocol-Version": negotiation.version,
+      ...(negotiation.stateless && method ? { "Mcp-Method": method } : {}),
+      ...(negotiation.stateless && typeof name === "string"
+        ? { "Mcp-Name": headerValue(name) }
+        : {}),
       ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
       ...transport.headers,
     };
@@ -557,7 +705,7 @@ function connectStreamableHttp(
       try {
         const response = await fetch(transport.url, {
           method: "POST",
-          headers: requestHeaders(),
+          headers: requestHeaders(method, params),
           body: JSON.stringify(request),
           signal: controller.signal,
         });
@@ -567,21 +715,13 @@ function connectStreamableHttp(
         const mintedSession = response.headers.get("mcp-session-id");
         if (mintedSession) sessionId = mintedSession;
 
-        if (!response.ok) {
-          throw new McpSnapshotError(
-            `HTTP ${response.status}: ${response.statusText}`,
-          );
-        }
+        if (!response.ok) throw await refusal(response);
 
         const contentType = response.headers.get("content-type") ?? "";
 
         if (contentType.includes("application/json")) {
           const msg = (await response.json()) as JsonRpcResponse;
-          if (msg.error) {
-            throw new McpSnapshotError(
-              `RPC error: ${msg.error.message} (${msg.error.code})`,
-            );
-          }
+          if (msg.error) throw rpcError(msg.error);
           return msg.result;
         }
 
@@ -607,11 +747,7 @@ function connectStreamableHttp(
               try {
                 const msg = JSON.parse(data) as JsonRpcResponse;
                 if (msg.id === id) {
-                  if (msg.error) {
-                    throw new McpSnapshotError(
-                      `RPC error: ${msg.error.message} (${msg.error.code})`,
-                    );
-                  }
+                  if (msg.error) throw rpcError(msg.error);
                   return msg.result;
                 }
               } catch (e) {
@@ -638,7 +774,7 @@ function connectStreamableHttp(
       if (params) msg.params = params;
       fetch(transport.url, {
         method: "POST",
-        headers: requestHeaders(),
+        headers: requestHeaders(method, params),
         body: JSON.stringify(msg),
       }).catch(() => {});
     },

@@ -2,6 +2,17 @@
 
 All notable changes to `mcp-parser` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org).
 
+## [0.4.2] - 2026-09-24
+
+### Added
+- `snapshot({ protocolVersion })` and `mcp-parser snapshot --protocol-version` choose the protocol revision to request, so one server can be snapshotted at every revision it claims to serve.
+- Stateless revisions (`2026-07-28` and later): the snapshot calls `server/discover` instead of `initialize`, carries the revision and client identity in `_meta` on every request, mirrors `Mcp-Method` and `Mcp-Name` into headers, and records the server's `supportedVersions` as `mcpVersions`.
+- `MCP_FIRST_STATELESS_REVISION`, `isProtocolRevision`, and `isStatelessRevision` exports.
+
+### Fixed
+- After `initialize`, requests kept declaring the revision the client offered rather than the one the server negotiated. Every later request, the `initialized` notification included, now declares the negotiated revision.
+- A refused HTTP request reported only its status. The error now carries the JSON-RPC error from the body, including the revisions a server says it supports.
+
 ## [0.4.1] - 2026-07-30
 
 ### Fixed

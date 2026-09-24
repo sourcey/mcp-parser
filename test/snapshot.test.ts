@@ -57,7 +57,9 @@ async function readBody(
  * rejects any later request that fails to echo it, which is exactly how real
  * stateful servers behave.
  */
-async function startStatefulHttpServer(options: { pages?: number } = {}): Promise<FakeServer> {
+async function startStatefulHttpServer(
+  options: { pages?: number; negotiate?: string } = {},
+): Promise<FakeServer> {
   const requests: RecordedRequest[] = [];
   const sessionId = "session-abc-123";
   const totalPages = options.pages ?? 3;
@@ -88,7 +90,7 @@ async function startStatefulHttpServer(options: { pages?: number } = {}): Promis
           jsonrpc: "2.0",
           id: message.id,
           result: {
-            protocolVersion: MCP_PROTOCOL_VERSION,
+            protocolVersion: options.negotiate ?? MCP_PROTOCOL_VERSION,
             serverInfo: { name: "fake-http", version: "2.0.0" },
             capabilities: { tools: { listChanged: false } },
           },
@@ -197,6 +199,88 @@ async function startSseServer(): Promise<FakeServer> {
 
 let running: FakeServer | null = null;
 
+/**
+ * A stateless (2026-07-28) Streamable HTTP server. It has no `initialize`,
+ * requires the revision in `_meta` and in the header, requires `Mcp-Method` to
+ * mirror the body, and refuses any revision it does not serve.
+ */
+async function startStatelessHttpServer(
+  options: { supported?: string[] } = {},
+): Promise<FakeServer> {
+  const requests: RecordedRequest[] = [];
+  const supported = options.supported ?? ["2026-07-28", "2025-11-25"];
+
+  const server = createServer(async (request, response) => {
+    const body = await readBody(request);
+    requests.push({
+      method: request.method ?? "",
+      url: request.url ?? "",
+      headers: request.headers as Record<string, string | undefined>,
+      body,
+    });
+    const message = body as { id?: number; method?: string; params?: Record<string, unknown> };
+    const meta = message.params?._meta as Record<string, unknown> | undefined;
+    const revision = meta?.["io.modelcontextprotocol/protocolVersion"];
+    const reply = (status: number, payload: Record<string, unknown>) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id ?? null, ...payload }));
+    };
+
+    if (
+      typeof revision !== "string" ||
+      request.headers["mcp-protocol-version"] !== revision ||
+      request.headers["mcp-method"] !== message.method
+    ) {
+      reply(400, { error: { code: -32020, message: "Header mismatch" } });
+      return;
+    }
+    if (!supported.includes(revision)) {
+      reply(400, {
+        error: {
+          code: -32022,
+          message: "Unsupported protocol version",
+          data: { supported, requested: revision },
+        },
+      });
+      return;
+    }
+    const identity = { "io.modelcontextprotocol/serverInfo": { name: "fake-stateless", version: "4.0.0" } };
+    if (message.method === "server/discover") {
+      reply(200, {
+        result: {
+          resultType: "complete",
+          supportedVersions: supported,
+          capabilities: { tools: {} },
+          _meta: identity,
+          ttlMs: 60_000,
+          cacheScope: "public",
+        },
+      });
+      return;
+    }
+    if (message.method === "tools/list") {
+      reply(200, {
+        result: {
+          resultType: "complete",
+          ...toolsPage(message.params?.cursor),
+          _meta: identity,
+          ttlMs: 60_000,
+          cacheScope: "public",
+        },
+      });
+      return;
+    }
+    reply(404, { error: { code: -32601, message: "Method not found" } });
+  });
+
+  const url = await listen(server);
+  return {
+    url: `${url}/mcp`,
+    requests,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
 afterEach(async () => {
   await running?.close();
   running = null;
@@ -266,6 +350,80 @@ describe("snapshot over streamable HTTP", () => {
       pageLimitReached: ["tools"],
       pageLimit: 2,
     });
+  });
+});
+
+describe("snapshot at a chosen protocol revision", () => {
+  it("offers the requested handshake revision in initialize", async () => {
+    running = await startStatefulHttpServer({ pages: 1, negotiate: "2025-06-18" });
+    const spec = await snapshot({
+      transport: { type: "streamable-http", url: running.url },
+      protocolVersion: "2025-06-18",
+    });
+
+    const initialize = running.requests.find(
+      (entry) => (entry.body as { method?: string })?.method === "initialize",
+    );
+    expect((initialize?.body as { params?: { protocolVersion?: string } }).params?.protocolVersion).toBe(
+      "2025-06-18",
+    );
+    expect(initialize?.headers["mcp-protocol-version"]).toBe("2025-06-18");
+    expect(spec.mcpVersion).toBe("2025-06-18");
+  });
+
+  it("declares the negotiated revision on every request after initialize", async () => {
+    running = await startStatefulHttpServer({ pages: 1, negotiate: "2025-03-26" });
+    const spec = await snapshot({ transport: { type: "streamable-http", url: running.url } });
+
+    const later = running.requests.filter(
+      (entry) =>
+        entry.method === "POST" && (entry.body as { method?: string })?.method !== "initialize",
+    );
+    expect(later.length).toBeGreaterThan(0);
+    for (const entry of later) expect(entry.headers["mcp-protocol-version"]).toBe("2025-03-26");
+    expect(spec.mcpVersion).toBe("2025-03-26");
+  });
+
+  it("speaks a stateless revision through server/discover and per-request metadata", async () => {
+    running = await startStatelessHttpServer();
+    const spec = await snapshot({
+      transport: { type: "streamable-http", url: running.url },
+      protocolVersion: "2026-07-28",
+    });
+
+    const methods = running.requests.map((entry) => (entry.body as { method?: string }).method);
+    expect(methods).not.toContain("initialize");
+    expect(methods[0]).toBe("server/discover");
+    for (const entry of running.requests) {
+      const meta = (entry.body as { params?: { _meta?: Record<string, unknown> } }).params?._meta;
+      expect(meta?.["io.modelcontextprotocol/clientInfo"]).toEqual({
+        name: MCP_PARSER_CLIENT_INFO.name,
+        version: MCP_PARSER_CLIENT_INFO.version,
+      });
+    }
+    expect(spec.server).toEqual({ name: "fake-stateless", version: "4.0.0" });
+    expect(spec.mcpVersion).toBe("2026-07-28");
+    expect(spec.mcpVersions).toEqual(["2026-07-28", "2025-11-25"]);
+    expect(spec.tools?.map((entry) => entry.name)).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  it("reports the revisions a server supports when it refuses the one requested", async () => {
+    running = await startStatelessHttpServer({ supported: ["2026-07-28"] });
+    await expect(
+      snapshot({
+        transport: { type: "streamable-http", url: running.url },
+        protocolVersion: "2027-01-01",
+      }),
+    ).rejects.toThrow(/-32022.*supported revisions: 2026-07-28/);
+  });
+
+  it("refuses a malformed revision and a stateless revision over HTTP+SSE", async () => {
+    await expect(
+      snapshot({ transport: { type: "streamable-http", url: "http://127.0.0.1:1/mcp" }, protocolVersion: "latest" }),
+    ).rejects.toThrow(/YYYY-MM-DD/);
+    await expect(
+      snapshot({ transport: { type: "sse", url: "http://127.0.0.1:1/sse" }, protocolVersion: "2026-07-28" }),
+    ).rejects.toThrow(/HTTP\+SSE predates/);
   });
 });
 
