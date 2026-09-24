@@ -74,13 +74,15 @@ jobs:
           fi
       - name: Verify npm registry bytes
         run: |
+          version="${RELEASE_TAG#v}"
           mkdir -p registry
-          for attempt in 1 2 3 4 5 6; do
-            if npm pack "mcp-parser@${RELEASE_TAG#v}" --pack-destination registry >/dev/null 2>&1; then break; fi
-            sleep $((attempt * 5))
+          # The registry can take minutes to serve a freshly published version.
+          for attempt in $(seq 1 40); do
+            if npm pack "mcp-parser@$version" --prefer-online --pack-destination registry >/dev/null 2>&1; then break; fi
+            sleep 15
           done
-          registry_tar="$(find registry -maxdepth 1 -type f -name '*.tgz' -print -quit)"
-          test -n "$registry_tar"
+          registry_tar="registry/mcp-parser-$version.tgz"
+          test -f "$registry_tar"
           test "$(sha256sum release/mcp-parser.tgz | cut -d' ' -f1)" = "$(sha256sum "$registry_tar" | cut -d' ' -f1)"
       - name: Publish exact GitHub release bytes
         env:
