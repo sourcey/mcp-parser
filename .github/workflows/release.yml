@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing release tag version without the v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.version && format('refs/tags/v{0}', inputs.version) || github.ref }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - name: Verify release identity
+        run: |
+          node -e '
+            const manifest = require("./package.json");
+            if (process.env.RELEASE_TAG !== `v${manifest.version}`) {
+              throw new Error(`${process.env.RELEASE_TAG} does not match ${manifest.version}`);
+            }
+          '
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - name: Pack once
+        run: |
+          mkdir -p release
+          npm pack --json --pack-destination release > release/pack.json
+          node -e '
+            const fs = require("fs");
+            const record = JSON.parse(fs.readFileSync("release/pack.json", "utf8"))[0];
+            fs.renameSync(`release/${record.filename}`, "release/mcp-parser.tgz");
+          '
+          sha256sum release/mcp-parser.tgz > release/mcp-parser.tgz.sha256
+      - name: Publish exact npm bytes if absent
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          if npm view "mcp-parser@$version" version >/dev/null 2>&1; then
+            echo "mcp-parser@$version already exists"
+          else
+            npm publish ./release/mcp-parser.tgz --access public --provenance
+          fi
+      - name: Verify npm registry bytes
+        run: |
+          mkdir -p registry
+          for attempt in 1 2 3 4 5 6; do
+            if npm pack "mcp-parser@${RELEASE_TAG#v}" --pack-destination registry >/dev/null 2>&1; then break; fi
+            sleep $((attempt * 5))
+          done
+          registry_tar="$(find registry -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$registry_tar"
+          test "$(sha256sum release/mcp-parser.tgz | cut -d' ' -f1)" = "$(sha256sum "$registry_tar" | cut -d' ' -f1)"
+      - name: Publish exact GitHub release bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/mcp-parser.tgz release/mcp-parser.tgz.sha256 --clobber
+          else
+            gh release create "$RELEASE_TAG" release/mcp-parser.tgz release/mcp-parser.tgz.sha256 --generate-notes --verify-tag
+          fi
