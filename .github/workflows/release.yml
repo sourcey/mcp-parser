@@ -54,11 +54,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          identity="$(npm whoami 2>/dev/null || true)"
-          echo "publishing as ${identity:-an identity this token cannot name}"
-          npm access list packages ${identity:+"$identity"} --json | node -e '
-            const packages = JSON.parse(require("fs").readFileSync(0, "utf8"));
-            const access = packages["mcp-parser"];
+          identity="$(npm whoami)"
+          echo "publishing as $identity"
+          npm access list collaborators mcp-parser --json | IDENTITY="$identity" node -e '
+            const collaborators = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const access = collaborators[process.env.IDENTITY];
             console.log(`mcp-parser access: ${access ?? "none"}`);
             if (access !== "read-write") process.exit(1);
           '
