@@ -54,8 +54,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "publishing as $(npm whoami)"
-          npm access list packages "$(npm whoami)" --json | node -e '
+          identity="$(npm whoami 2>/dev/null || true)"
+          echo "publishing as ${identity:-an identity this token cannot name}"
+          npm access list packages ${identity:+"$identity"} --json | node -e '
             const packages = JSON.parse(require("fs").readFileSync(0, "utf8"));
             const access = packages["mcp-parser"];
             console.log(`mcp-parser access: ${access ?? "none"}`);
