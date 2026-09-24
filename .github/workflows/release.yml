@@ -50,6 +50,17 @@ jobs:
             fs.renameSync(`release/${record.filename}`, "release/mcp-parser.tgz");
           '
           sha256sum release/mcp-parser.tgz > release/mcp-parser.tgz.sha256
+      - name: Name the publishing identity
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "publishing as $(npm whoami)"
+          npm access list packages "$(npm whoami)" --json | node -e '
+            const packages = JSON.parse(require("fs").readFileSync(0, "utf8"));
+            const access = packages["mcp-parser"];
+            console.log(`mcp-parser access: ${access ?? "none"}`);
+            if (access !== "read-write") process.exit(1);
+          '
       - name: Publish exact npm bytes if absent
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
