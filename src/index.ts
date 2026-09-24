@@ -41,8 +41,11 @@ export { MCP_SPEC_VERSION, mcpSpecSchema } from "mcp-schema";
 // Protocol identity
 export {
   LIST_PAGE_LIMIT,
+  MCP_FIRST_STATELESS_REVISION,
   MCP_PARSER_CLIENT_INFO,
   MCP_PROTOCOL_VERSION,
+  isProtocolRevision,
+  isStatelessRevision,
 } from "./protocol.js";
 
 // Parser

@@ -128,6 +128,12 @@ async function cmdValidate(): Promise<void> {
 }
 
 async function cmdSnapshot(): Promise<void> {
+  const revisionIdx = args.indexOf("--protocol-version");
+  const protocolVersion = revisionIdx !== -1 ? args[revisionIdx + 1] : undefined;
+  if (revisionIdx !== -1 && (!protocolVersion || protocolVersion.startsWith("-"))) {
+    console.error("--protocol-version needs a YYYY-MM-DD revision");
+    process.exit(1);
+  }
   const headers = parseHeaders();
   const output = getOutputFlag() ?? "mcp.json";
 
@@ -155,8 +161,6 @@ async function cmdSnapshot(): Promise<void> {
     process.exit(1);
   }
 
-  const revisionIdx = args.indexOf("--protocol-version");
-  const protocolVersion = revisionIdx !== -1 ? args[revisionIdx + 1] : undefined;
   const spec = await snapshot({ transport, ...(protocolVersion && { protocolVersion }) });
 
   await writeFile(output, JSON.stringify(spec, null, 2) + "\n");

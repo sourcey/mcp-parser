@@ -444,3 +444,14 @@ describe("snapshot over legacy SSE", () => {
     }
   });
 });
+
+describe("public protocol exports", () => {
+  it("re-exports the revision helpers the changelog documents", async () => {
+    const api = await import("../src/index.js");
+    expect(api.MCP_FIRST_STATELESS_REVISION).toBe("2026-07-28");
+    expect(api.isProtocolRevision("2025-06-18")).toBe(true);
+    expect(api.isProtocolRevision("latest")).toBe(false);
+    expect(api.isStatelessRevision("2026-07-28")).toBe(true);
+    expect(api.isStatelessRevision("2025-11-25")).toBe(false);
+  });
+});
