@@ -26,7 +26,6 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: "24"
-          registry-url: https://registry.npmjs.org
           cache: npm
       - name: Verify release identity
         run: |
@@ -49,21 +48,7 @@ jobs:
             const record = JSON.parse(fs.readFileSync("release/pack.json", "utf8"))[0];
             fs.renameSync(`release/${record.filename}`, "release/mcp-parser.tgz");
           '
-      - name: Name the publishing identity
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          identity="$(npm whoami)"
-          echo "publishing as $identity"
-          npm access list collaborators mcp-parser --json | IDENTITY="$identity" node -e '
-            const collaborators = JSON.parse(require("fs").readFileSync(0, "utf8"));
-            const access = collaborators[process.env.IDENTITY];
-            console.log(`mcp-parser access: ${access ?? "none"}`);
-            if (access !== "read-write") process.exit(1);
-          '
       - name: Publish exact npm bytes if absent
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           version="${RELEASE_TAG#v}"
           if npm view "mcp-parser@$version" version >/dev/null 2>&1; then
