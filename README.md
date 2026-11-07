@@ -56,7 +56,73 @@ await writeFile("mcp.json", JSON.stringify(spec, null, 2));
 await writeFile("mcp.md", generateMarkdown(spec));
 ```
 
-## What is mcp.json?
+## Snapshots and Agent Plugins configuration
+
+Two different documents commonly use the name `mcp.json`:
+
+| Document | Identifying fields | Purpose |
+| --- | --- | --- |
+| Sourcey server snapshot | `mcpSpec`, `server`, `tools`/`resources`/`prompts` | Capture and document one server's advertised surface |
+| [Agent Plugins MCP configuration](https://agent-plugins.org/specification#721-discovery-and-configuration) | `$schema`, `mcpServers` | Locate and connect to the servers in a plugin |
+
+The package supports the published Agent Plugins **1.0.0** configuration contract.
+Use `mcp.json` for that configuration at the plugin root, and a separate filename
+such as `api.snapshot.json` for a captured surface. A connection configuration
+does not contain tools or their schemas; snapshot its server to obtain them.
+
+```bash
+mcp-parser validate-config ./plugin/mcp.json
+mcp-parser parse-config ./plugin/mcp.json
+mcp-parser snapshot --config ./plugin/mcp.json --server api -o api.snapshot.json
+# For stdio, also supply a dedicated persistent directory:
+mcp-parser snapshot --config ./plugin/mcp.json --server local \
+  --plugin-data ./plugin-state/local -o local.snapshot.json
+# Emit the standard plugin configuration from explicit snapshot transport hints:
+mcp-parser generate api.snapshot.json --format agent-plugin --server api -o mcp.json
+```
+
+Config snapshots select exactly one server and default to `mcp.snapshot.json`;
+they refuse to overwrite the input configuration. `--config` cannot be combined
+with another transport or `--header`. `--plugin-root` defaults to the config's
+directory. stdio uses that root as its default working directory, resolves
+bundled executables and explicit working directories within their real roots,
+and supplies `PLUGIN_ROOT` and `PLUGIN_DATA`. Only `args`, `env` values and `cwd`
+expand those two variables, once. Other placeholders remain literal.
+
+Remote URLs require HTTPS except on loopback, and cannot contain user information
+or fragments. Configured headers remain literal; generated HTTP/MCP headers take
+precedence. Redirects and cross-origin SSE message endpoints are refused.
+Snapshots omit environment values and HTTP headers. Add any required public
+configuration values when authoring a plugin; never embed credentials in it.
+Generation requires valid explicit transport hints and does not infer missing
+commands, URLs, or authentication settings.
+
+These are MCP configuration utilities, not a plugin installer or a complete
+Agent Plugins client. The caller owns manifest validation, matching its schema
+version, skill discovery, authorization, and the per-plugin data directory's
+lifecycle. `validateConfig(value, { pluginSchema })` can check the manifest's
+schema identifier against the MCP configuration. Validation is offline, selects
+only the recognized canonical schema, and rejects unsupported releases.
+
+### Configuration API
+
+`parseConfig(path)` and `parseConfigString(content)` require a fully valid config.
+`validateConfig(value, options?)` returns `valid`, `topLevelValid`, `diagnostics`,
+and a `servers` map containing independently valid entries. An invalid envelope
+empties that map; an invalid server leaves valid siblings available.
+`resolveConfigServer(config, name, { pluginRoot, pluginData? })` resolves one
+entry for the existing `snapshot` API. `snapshotConfig` combines those steps.
+
+```ts
+import { createConfig, snapshotConfig } from "mcp-parser";
+
+const config = createConfig({
+  api: { type: "streamable-http", url: "https://example.com/mcp" },
+});
+const surface = await snapshotConfig(config, "api", { pluginRoot: "/path/to/plugin" });
+```
+
+### Server snapshot format
 
 A static snapshot of an MCP server's capabilities: its tools, resources, and prompts. Think of it as `openapi.json` for MCP servers.
 

@@ -2,6 +2,19 @@
 
 All notable changes to `mcp-parser` are documented here. Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org).
 
+## [0.4.3] - 2026-11-08
+
+Requires mcp-schema 0.3.3 or newer.
+
+### Added
+- Agent Plugins 1.0.0 MCP configuration parsing, offline schema and semantic validation, per-server diagnostics, and standard configuration generation from explicit transport hints.
+- `parse-config`, `validate-config`, `snapshot --config --server`, and `generate --format agent-plugin` CLI workflows.
+- Configured stdio snapshots resolve plugin paths, expand plugin variables once, provide persistent plugin data, and support `cwd` through the existing transport.
+
+### Fixed
+- Client-generated HTTP/MCP headers take precedence over configured headers regardless of casing. Remote transports refuse redirects and cross-origin legacy SSE message endpoints.
+- stdio spawn and stdin errors reject the snapshot instead of escaping as uncaught process errors.
+
 ## [0.4.2] - 2026-09-24
 
 ### Added

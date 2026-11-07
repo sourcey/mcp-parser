@@ -72,6 +72,8 @@ export interface StdioTransport {
   args?: string[];
   /** Environment variables. */
   env?: Record<string, string>;
+  /** Working directory for the subprocess. */
+  cwd?: string;
 }
 
 export interface SseTransport {
@@ -316,6 +318,7 @@ async function introspect(
             type: "stdio" as const,
             command: transport.command,
             ...(transport.args?.length && { args: transport.args }),
+            ...(transport.cwd && { cwd: transport.cwd }),
           }
         : { type: transport.type, url: transport.url };
 
@@ -410,9 +413,19 @@ export async function snapshot(options: SnapshotOptions): Promise<McpSpec> {
 // ---------------------------------------------------------------------------
 
 function connectStdio(transport: StdioTransport, timeout: number): McpConnection {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const [key, value] of Object.entries(transport.env ?? {})) {
+    if (process.platform === "win32") {
+      for (const existing of Object.keys(env)) {
+        if (existing.toUpperCase() === key.toUpperCase()) delete env[existing];
+      }
+    }
+    env[key] = value;
+  }
   const proc = spawn(transport.command, transport.args ?? [], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...transport.env },
+    env,
+    cwd: transport.cwd,
   });
 
   let nextId = 1;
@@ -421,6 +434,15 @@ function connectStdio(transport: StdioTransport, timeout: number): McpConnection
     number,
     { resolve: (value: unknown) => void; reject: (reason: Error) => void }
   >();
+  let failure: Error | undefined;
+  const fail = (error: Error) => {
+    failure = error;
+    for (const request of pending.values()) request.reject(error);
+    pending.clear();
+  };
+  proc.on("error", (error) => fail(new McpSnapshotError(`Could not start MCP server: ${error.message}`)));
+  proc.on("exit", () => fail(new McpSnapshotError("MCP server exited before responding")));
+  proc.stdin.on("error", (error) => fail(new McpSnapshotError(`MCP stdin failed: ${error.message}`)));
 
   proc.stdout.on("data", (chunk: Buffer) => {
     buffer += chunk.toString();
@@ -449,6 +471,7 @@ function connectStdio(transport: StdioTransport, timeout: number): McpConnection
   return {
     send(method, params) {
       return new Promise((resolve, reject) => {
+        if (failure) { reject(failure); return; }
         const id = nextId++;
         const request: JsonRpcRequest = {
           jsonrpc: "2.0",
@@ -458,12 +481,13 @@ function connectStdio(transport: StdioTransport, timeout: number): McpConnection
         };
         pending.set(id, { resolve, reject });
         proc.stdin.write(JSON.stringify(request) + "\n");
-        setTimeout(() => {
+        const timer = setTimeout(() => {
           if (pending.has(id)) {
             pending.delete(id);
             reject(new McpSnapshotError(`Timeout waiting for response to ${method}`));
           }
         }, timeout);
+        timer.unref();
       });
     },
     notify(method, params) {
@@ -481,13 +505,21 @@ function connectStdio(transport: StdioTransport, timeout: number): McpConnection
 // SSE transport
 // ---------------------------------------------------------------------------
 
+/** Client-generated fields take precedence, including differently cased names. */
+function connectionHeaders(configured: Record<string, string> | undefined, generated: Record<string, string>): Headers {
+  const headers = new Headers(configured);
+  for (const name of ["host", "content-length", "transfer-encoding", "connection"]) headers.delete(name);
+  for (const [name, value] of Object.entries(generated)) headers.set(name, value);
+  return headers;
+}
+
 async function connectSse(
   transport: SseTransport,
   timeout: number,
   negotiation: Negotiation,
 ): Promise<McpConnection> {
-  const baseUrl = transport.url.replace(/\/sse\/?$/, "");
   let messageEndpoint: string | null = null;
+  let endpointError: Error | undefined;
   let nextId = 1;
   const pending = new Map<
     number,
@@ -497,11 +529,11 @@ async function connectSse(
   // Connect to SSE endpoint and wait for the endpoint event
   const controller = new AbortController();
   const sseResponse = await fetch(transport.url, {
-    headers: {
+    headers: connectionHeaders(transport.headers, {
       Accept: "text/event-stream",
       "MCP-Protocol-Version": negotiation.version,
-      ...transport.headers,
-    },
+    }),
+    redirect: "error",
     signal: controller.signal,
   });
 
@@ -532,8 +564,17 @@ async function connectSse(
         }
       }
       if (eventType === "endpoint" && data) {
-        // The server tells us where to POST messages
-        messageEndpoint = data.startsWith("http") ? data : `${baseUrl}${data}`;
+        // Never send configured headers or messages to another origin.
+        try {
+          const endpoint = new URL(data, transport.url);
+          if (endpoint.origin !== new URL(transport.url).origin || endpoint.username || endpoint.password || endpoint.hash) {
+            throw new Error("SSE message endpoint must use the configured origin without user information or a fragment");
+          }
+          messageEndpoint = endpoint.href;
+        } catch (error) {
+          endpointError = new McpSnapshotError(error instanceof Error ? error.message : "Invalid SSE endpoint");
+          controller.abort();
+        }
       } else if (eventType === "message" && data) {
         try {
           const msg = JSON.parse(data) as JsonRpcResponse;
@@ -569,9 +610,10 @@ async function connectSse(
 
   // Wait for the endpoint event
   const endpointDeadline = Date.now() + timeout;
-  while (!messageEndpoint && Date.now() < endpointDeadline) {
+  while (!messageEndpoint && !endpointError && Date.now() < endpointDeadline) {
     await new Promise((r) => setTimeout(r, 50));
   }
+  if (endpointError) throw endpointError;
   if (!messageEndpoint) {
     controller.abort();
     throw new McpSnapshotError("Timeout waiting for SSE endpoint event");
@@ -591,23 +633,26 @@ async function connectSse(
 
         fetch(messageEndpoint!, {
           method: "POST",
-          headers: {
+          headers: connectionHeaders(transport.headers, {
             "Content-Type": "application/json",
             "MCP-Protocol-Version": negotiation.version,
-            ...transport.headers,
-          },
+          }),
+          redirect: "error",
           body: JSON.stringify(request),
+        }).then(async (response) => {
+          if (!response.ok) throw await refusal(response);
         }).catch((err: Error) => {
           pending.delete(id);
           reject(new McpSnapshotError(`SSE POST failed: ${err.message}`));
         });
 
-        setTimeout(() => {
+        const timer = setTimeout(() => {
           if (pending.has(id)) {
             pending.delete(id);
             reject(new McpSnapshotError(`Timeout waiting for response to ${method}`));
           }
         }, timeout);
+        timer.unref();
       });
     },
     notify(method, params) {
@@ -615,11 +660,11 @@ async function connectSse(
       if (params) msg.params = params;
       fetch(messageEndpoint!, {
         method: "POST",
-        headers: {
+        headers: connectionHeaders(transport.headers, {
           "Content-Type": "application/json",
           "MCP-Protocol-Version": negotiation.version,
-          ...transport.headers,
-        },
+        }),
+        redirect: "error",
         body: JSON.stringify(msg),
       }).catch(() => {});
     },
@@ -672,11 +717,11 @@ function connectStreamableHttp(
   function requestHeaders(
     method?: string,
     params?: Record<string, unknown>,
-  ): Record<string, string> {
+  ): Headers {
     // Stateless revisions mirror the method, and the tool, prompt, or resource
     // it names, into headers that intermediaries can route on.
     const name = params?.name ?? params?.uri;
-    return {
+    return connectionHeaders(transport.headers, {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       "MCP-Protocol-Version": negotiation.version,
@@ -685,8 +730,7 @@ function connectStreamableHttp(
         ? { "Mcp-Name": headerValue(name) }
         : {}),
       ...(sessionId ? { "Mcp-Session-Id": sessionId } : {}),
-      ...transport.headers,
-    };
+    });
   }
 
   return {
@@ -708,6 +752,7 @@ function connectStreamableHttp(
           headers: requestHeaders(method, params),
           body: JSON.stringify(request),
           signal: controller.signal,
+          redirect: "error",
         });
 
         clearTimeout(timer);
@@ -776,6 +821,7 @@ function connectStreamableHttp(
         method: "POST",
         headers: requestHeaders(method, params),
         body: JSON.stringify(msg),
+        redirect: "error",
       }).catch(() => {});
     },
     close() {
@@ -785,6 +831,7 @@ function connectStreamableHttp(
       void fetch(transport.url, {
         method: "DELETE",
         headers: requestHeaders(),
+        redirect: "error",
       }).catch(() => {});
     },
   };
