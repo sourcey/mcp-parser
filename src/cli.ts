@@ -10,10 +10,12 @@
  *   mcp-parser generate <file>       Generate docs/context output from an mcp.json
  */
 
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, realpath } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { parse } from "./parse.js";
 import { validate } from "./validate.js";
 import { snapshot } from "./snapshot.js";
+import { parseConfig, validateConfig, snapshotConfig, generateConfig } from "./config.js";
 import { generateLlmsTxt, generateLlmsFullTxt, generateMarkdown } from "./generate.js";
 
 const args = process.argv.slice(2);
@@ -27,6 +29,22 @@ async function main(): Promise<void> {
     case "validate":
       await cmdValidate();
       break;
+    case "parse-config": {
+      if (!args[1]) throw new Error("Usage: mcp-parser parse-config <file>");
+      const json = JSON.stringify(await parseConfig(args[1]), null, 2) + "\n";
+      const output = getOutputFlag();
+      if (output) await writeFile(output, json);
+      else console.log(json.trimEnd());
+      break;
+    }
+    case "validate-config": {
+      if (!args[1]) throw new Error("Usage: mcp-parser validate-config <file>");
+      const result = validateConfig(JSON.parse(await readFile(args[1], "utf8")));
+      for (const diagnostic of result.diagnostics) console.error(`${diagnostic.path}: ${diagnostic.message}`);
+      if (!result.valid) process.exitCode = 1;
+      else console.log("Valid Agent Plugins MCP configuration.");
+      break;
+    }
     case "snapshot":
       await cmdSnapshot();
       break;
@@ -52,6 +70,8 @@ mcp-parser - Snapshot, parse, validate, and document MCP servers
 Usage:
   mcp-parser parse <file>                        Parse and print an mcp.json
   mcp-parser validate <file>                     Validate an mcp.json file
+  mcp-parser parse-config <file>                 Parse Agent Plugins MCP configuration
+  mcp-parser validate-config <file>              Validate Agent Plugins MCP configuration
   mcp-parser snapshot <transport> [options]       Snapshot a running MCP server
   mcp-parser generate <file> [--format <fmt>]    Generate output from mcp.json
 
@@ -59,10 +79,14 @@ Transports:
   --stdio "<command>"     Spawn a process and communicate via stdin/stdout
   --sse <url>             Connect to an SSE endpoint
   --http <url>            Connect via streamable HTTP
+  --config <file>         Read Agent Plugins MCP configuration (select with --server)
 
 Options:
   --output, -o <file>     Write output to file instead of stdout
-  --format <fmt>          Output format: markdown (default), llms-txt, llms-full-txt
+  --format <fmt>          Output: markdown (default), llms-txt, llms-full-txt, agent-plugin
+  --server <name>         Configuration server to snapshot or generate
+  --plugin-root <dir>     Plugin root (default: configuration file's directory)
+  --plugin-data <dir>     Dedicated persistent plugin data directory (stdio config)
   --header <key:value>    Add HTTP header (SSE/HTTP transports, repeatable)
   --help, -h              Show this help message
 
@@ -74,6 +98,9 @@ Examples:
   mcp-parser snapshot --http http://localhost:3000/mcp --protocol-version 2026-07-28
   mcp-parser generate ./mcp.json -o mcp.md
   mcp-parser generate ./mcp.json --format llms-txt -o llms.txt
+  mcp-parser validate-config ./plugin/mcp.json
+  mcp-parser snapshot --config ./plugin/mcp.json --server api -o api.snapshot.json
+  mcp-parser generate api.snapshot.json --format agent-plugin --server api -o mcp.json
 `);
 }
 
@@ -135,13 +162,37 @@ async function cmdSnapshot(): Promise<void> {
     process.exit(1);
   }
   const headers = parseHeaders();
-  const output = getOutputFlag() ?? "mcp.json";
+  const configFile = getFlagValue("--config");
+  if (args.includes("--config") && !configFile) throw new Error("--config requires a file");
+  const output = getOutputFlag() ?? (configFile ? "mcp.snapshot.json" : "mcp.json");
 
   let transport: Parameters<typeof snapshot>[0]["transport"];
 
   const stdioIdx = args.indexOf("--stdio");
   const sseIdx = args.indexOf("--sse");
   const httpIdx = args.indexOf("--http");
+  const modes = [stdioIdx !== -1, sseIdx !== -1, httpIdx !== -1, !!configFile].filter(Boolean).length;
+  if (modes !== 1) throw new Error("Choose exactly one transport: --stdio, --sse, --http, or --config");
+
+  if (configFile) {
+    if (args.includes("--header")) throw new Error("Configured headers come from mcp.json; --header cannot override them");
+    const serverName = getFlagValue("--server");
+    if (!serverName) throw new Error("--config requires --server <name>");
+    const inputPath = await realpath(configFile);
+    const outputPath = await realpath(output).catch(() => resolve(output));
+    if (inputPath === outputPath) throw new Error("Snapshot output must differ from the connection configuration");
+    const config: unknown = JSON.parse(await readFile(configFile, "utf8"));
+    const validation = validateConfig(config);
+    for (const diagnostic of validation.diagnostics) console.error(`${diagnostic.path}: ${diagnostic.message}`);
+    const spec = await snapshotConfig(config, serverName, {
+      pluginRoot: getFlagValue("--plugin-root") ?? dirname(inputPath),
+      pluginData: getFlagValue("--plugin-data"),
+      ...(protocolVersion && { protocolVersion }),
+    });
+    await writeFile(output, JSON.stringify(spec, null, 2) + "\n");
+    console.log(`Snapshot written to ${output}`);
+    return;
+  }
 
   if (stdioIdx !== -1 && args[stdioIdx + 1]) {
     const commandStr = args[stdioIdx + 1];
@@ -191,8 +242,11 @@ async function cmdGenerate(): Promise<void> {
     case "llms-full-txt":
       content = generateLlmsFullTxt(spec);
       break;
+    case "agent-plugin":
+      content = generateConfig(spec, getFlagValue("--server") ?? spec.server.name);
+      break;
     default:
-      console.error(`Unknown format: ${format}. Use: markdown, llms-txt, llms-full-txt`);
+      console.error(`Unknown format: ${format}. Use: markdown, llms-txt, llms-full-txt, agent-plugin`);
       process.exit(1);
   }
 
@@ -225,7 +279,7 @@ function getOutputFlag(): string | undefined {
 
 function getFlagValue(flag: string): string | undefined {
   const idx = args.indexOf(flag);
-  if (idx !== -1 && args[idx + 1]) return args[idx + 1];
+  if (idx !== -1 && args[idx + 1] && !args[idx + 1].startsWith("-")) return args[idx + 1];
   return undefined;
 }
 

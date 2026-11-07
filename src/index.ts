@@ -37,6 +37,11 @@ export type {
 } from "mcp-schema";
 
 export { MCP_SPEC_VERSION, mcpSpecSchema } from "mcp-schema";
+export { agentPluginsMcpSchema, AGENT_PLUGINS_MCP_SCHEMA_URL } from "mcp-schema";
+export type { AgentPluginsMcpConfig, AgentPluginsMcpServer } from "mcp-schema";
+
+export { parseConfig, parseConfigString, validateConfig, createConfig, generateConfig, resolveConfigServer, snapshotConfig } from "./config.js";
+export type { ConfigValidationResult, ConfigValidationOptions, ConfigPaths } from "./config.js";
 
 // Protocol identity
 export {

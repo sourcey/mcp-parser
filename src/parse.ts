@@ -50,6 +50,10 @@ export function parseString(
 
   const spec = raw as Record<string, unknown>;
 
+  if ("mcpServers" in spec || (typeof spec.$schema === "string" && spec.$schema.startsWith("https://agent-plugins.org/"))) {
+    throw new McpParseError("This is an Agent Plugins connection configuration; use parseConfig/validateConfig (CLI: parse-config/validate-config), or snapshot --config <file> --server <name> to capture its server surface");
+  }
+
   if (typeof spec.mcpSpec !== "string") {
     throw new McpParseError('Missing or invalid "mcpSpec" version field');
   }

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { MCP_PARSER_CLIENT_INFO, MCP_PROTOCOL_VERSION } from "../src/protocol.js";
 import { snapshot } from "../src/snapshot.js";
+import { createConfig, snapshotConfig } from "../src/config.js";
 
 const stdioServerPath = fileURLToPath(
   new URL("./fixtures/fake-stdio-server.mjs", import.meta.url),
@@ -141,7 +142,7 @@ async function startStatefulHttpServer(
 }
 
 /** Legacy HTTP+SSE server: announces its message endpoint, then streams replies. */
-async function startSseServer(): Promise<FakeServer> {
+async function startSseServer(endpoint = "/messages"): Promise<FakeServer> {
   const requests: RecordedRequest[] = [];
   let stream: import("node:http").ServerResponse | null = null;
 
@@ -161,7 +162,7 @@ async function startSseServer(): Promise<FakeServer> {
         connection: "keep-alive",
       });
       stream = response;
-      response.write("event: endpoint\ndata: /messages\n\n");
+      response.write(`event: endpoint\ndata: ${endpoint}\n\n`);
       return;
     }
 
@@ -301,6 +302,23 @@ describe("snapshot over stdio", () => {
 });
 
 describe("snapshot over streamable HTTP", () => {
+  it("snapshots a configured endpoint and lets generated headers override case-insensitive package fields", async () => {
+    running = await startStatefulHttpServer({ pages: 1 });
+    const config = createConfig({ api: {
+      type: "streamable-http", url: running.url,
+      headers: { "mcp-protocol-version": "package-value", "content-type": "text/plain", "mcp-session-id": "package-session", "X-Tenant": "${PLUGIN_ROOT}" },
+    } });
+    const spec = await snapshotConfig(config, "api", { pluginRoot: "/unused" });
+    expect(spec.tools).toHaveLength(1);
+    expect(spec.transport).toEqual({ type: "streamable-http", url: running.url });
+    for (const entry of running.requests) {
+      expect(entry.headers["mcp-protocol-version"]).toBe(MCP_PROTOCOL_VERSION);
+      expect(entry.headers["content-type"]).toBe("application/json");
+      expect(entry.headers["x-tenant"]).toBe("${PLUGIN_ROOT}");
+      if ((entry.body as { method?: string })?.method !== "initialize") expect(entry.headers["mcp-session-id"]).toBe("session-abc-123");
+    }
+  });
+
   it("requests the pinned protocol revision and identifies this package", async () => {
     running = await startStatefulHttpServer({ pages: 1 });
     const spec = await snapshot({ transport: { type: "streamable-http", url: running.url } });
@@ -428,6 +446,23 @@ describe("snapshot at a chosen protocol revision", () => {
 });
 
 describe("snapshot over legacy SSE", () => {
+  it("snapshots a configured legacy server with literal headers and generated protocol fields", async () => {
+    running = await startSseServer();
+    const config = createConfig({ legacy: { type: "sse", url: running.url, headers: { "MCP-Protocol-Version": "package-value", "X-Tenant": "${PLUGIN_DATA}" } } });
+    const spec = await snapshotConfig(config, "legacy", { pluginRoot: "/unused", timeout: 1000 });
+    expect(spec.tools).toHaveLength(3);
+    for (const entry of running.requests) {
+      expect(entry.headers["mcp-protocol-version"]).toBe(MCP_PROTOCOL_VERSION);
+      expect(entry.headers["x-tenant"]).toBe("${PLUGIN_DATA}");
+    }
+  });
+
+  it("refuses an SSE endpoint event that changes origins", async () => {
+    running = await startSseServer("https://example.org/messages");
+    await expect(snapshot({ transport: { type: "sse", url: running.url, headers: { "X-Tenant": "public" } }, timeout: 1000 })).rejects.toThrow(/configured origin/);
+    expect(running.requests).toHaveLength(1);
+  });
+
   it("sends the protocol revision on the stream and on posted messages", async () => {
     running = await startSseServer();
     const spec = await snapshot({ transport: { type: "sse", url: running.url }, timeout: 10_000 });
@@ -441,6 +476,22 @@ describe("snapshot over legacy SSE", () => {
     expect(posted.length).toBeGreaterThan(0);
     for (const entry of posted) {
       expect(entry.headers["mcp-protocol-version"]).toBe(MCP_PROTOCOL_VERSION);
+    }
+  });
+});
+
+describe("remote redirects", () => {
+  it.each(["streamable-http", "sse"] as const)("does not forward %s headers or messages through redirects", async (type) => {
+    let received = 0;
+    const destination = createServer((_request, response) => { received++; response.writeHead(500).end(); });
+    const target = await listen(destination);
+    const origin = createServer((_request, response) => response.writeHead(307, { location: target }).end());
+    const url = await listen(origin);
+    try {
+      await expect(snapshot({ transport: { type, url, headers: { "X-Tenant": "public" } }, timeout: 1000 })).rejects.toThrow();
+      expect(received).toBe(0);
+    } finally {
+      await Promise.all([new Promise<void>((resolve) => origin.close(() => resolve())), new Promise<void>((resolve) => destination.close(() => resolve()))]);
     }
   });
 });
